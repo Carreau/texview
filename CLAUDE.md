@@ -83,19 +83,39 @@ Installable package (flit, `pyproject.toml`, console script
 - `GET /api/state?ctx=N` → `{source, suggestions: [{..., match}]}`
   (reloads; `ctx` = context lines either side of each anchor,
   default 1, clamped 0–99).
+- `GET /api/file?id=<sid>` → `{file, text}`: full text of the file the
+  suggestion points at, resolved through the store (no client paths).
 - `POST /api/decide {id, status}` (status ∈ pending/accepted/rejected).
 - `POST /api/apply` → `{applied: [...], skipped: [{id, reason}]}`.
 
 ## UI notes
 
 - Keyboard: `j/k` move, `a/r` decide + auto-advance, `u` undo, `m`
-  toggle math, `+/-` context lines, `A` apply. Filters:
+  toggle math, `d` document pane, `+/-` context lines, `A` apply.
+  No shortcut legend in the toolbar: keys are shown as `<kbd>` badges
+  on the buttons they trigger (`a/r/u` + a `j/k` hint only on the
+  selected card; `A`, `m`, `d`, `+/−` on their controls). A round `?`
+  button (or the `?` key) opens a native `<dialog>` with the overview
+  and full shortcut table; Esc/backdrop-click closes it, and other
+  shortcuts are ignored while it is open.
+  Filters:
   all/pending/accepted/rejected, plus tag chips in the toolbar (click
   to filter by tag, click again to clear; card tag chips work too;
   combines with the status filter). The `± N lines` toolbar input sets
   diff context (persisted in localStorage as `texreview.ctx`).
 - Word-level diff = LCS over whitespace-preserving tokens (JS, capped;
   falls back to plain del/ins blocks on huge edits).
+- Document pane (`⧉ Doc` / `d`, persisted as `texreview.doc`, hidden
+  under 1100px): sticky side `<pre>` showing the selected suggestion's
+  whole file verbatim with line numbers; all suggestion spans in that
+  file are `<mark>`ed by status, selection syncs both ways (card ↔
+  mark click), refetched when state reloads. Pane-header buttons:
+  `wrap`/`no-wrap` (horizontal scroll) and `⇄ side` (left/right),
+  both persisted (`texreview.wrap`, `texreview.docside`). Each line
+  is a block-level `.ln` span with an absolutely-positioned gutter
+  number, so wrapped continuations indent past the gutter; marks are
+  split at newlines so they never cross `.ln` boundaries. Plain text by design —
+  see PLAN.md before adding a highlighter.
 - MathJax (tex-svg) typesets **only** margin notes and the rendered
   before/after previews via targeted `typesetPromise` calls
   (`startup.typeset: false`). The diff block is verbatim source — the

@@ -93,10 +93,36 @@ window.MathJax = {
          padding: 4px 2px; margin-right: 10px; font: 500 13px var(--sans);
          color: var(--faint); cursor: pointer; }
   .tab.on { color: var(--ink); border-bottom-color: var(--pencil); }
-  nav .keys { margin-left: auto; font: 12px var(--mono); color: var(--faint); }
-  nav .keys b { font-weight: 600; color: var(--ink); background: var(--paper);
-                border: 1px solid var(--rule); border-bottom-width: 2px;
-                border-radius: 4px; padding: 0 5px; }
+  /* shortcut badges live on the controls themselves */
+  kbd { font: 11px var(--mono); border: 1px solid currentColor;
+        border-radius: 3px; padding: 0 4px; margin-left: 7px;
+        opacity: .55; }
+  .act kbd { display: none; }
+  .card.sel .act kbd { display: inline-block; }
+  .keyhint { display: none; margin-left: auto; align-self: center;
+             font: 11px var(--mono); color: var(--faint); }
+  .card.sel .keyhint { display: inline; }
+  #helpBtn { margin-left: auto; border: 1px solid var(--rule);
+             border-radius: 999px; width: 24px; height: 24px;
+             padding: 0; text-align: center; align-self: center; }
+
+  /* ---- help dialog ---- */
+  #help { border: 1px solid var(--rule); border-radius: 8px;
+          background: var(--paper); color: var(--ink);
+          max-width: 30rem; padding: 20px 24px;
+          font: 13px/1.6 var(--sans); }
+  #help::backdrop { background: rgba(31, 35, 40, .45); }
+  #help h2 { margin: 0 0 6px; font: 600 15px var(--sans); }
+  #help p { margin: 6px 0; color: #3d4147; }
+  #help table { border-collapse: collapse; margin-top: 10px; }
+  #help td { padding: 2px 14px 2px 0; vertical-align: baseline; }
+  #help td:first-child { font: 12px var(--mono); white-space: nowrap; }
+  #help kbd { margin: 0 2px 0 0; opacity: 1; color: var(--ink);
+              border-color: var(--rule); border-bottom-width: 2px;
+              background: #f7f5f0; }
+  #help .close { float: right; border: 0; background: none;
+                 font: 16px var(--sans); cursor: pointer;
+                 color: var(--faint); }
 
   /* ---- cards ---- */
   main { max-width: 1060px; margin: 0 auto 90px; padding: 0 20px; }
@@ -108,7 +134,7 @@ window.MathJax = {
     gap: 6px 22px; cursor: pointer;
   }
   /* keep j/k-selected cards clear of the sticky header + toolbar */
-  .card { scroll-margin-top: calc(var(--hdr, 48px) + 52px); }
+  .card { scroll-margin-top: calc(var(--hdr, 48px) + var(--navh, 44px) + 8px); }
   .card.sel { border-left-color: var(--pencil);
               box-shadow: 0 2px 10px rgba(31,35,40,.10); }
   .card.applied { opacity: .55; }
@@ -170,6 +196,60 @@ window.MathJax = {
   .act.rej.on { background: var(--no-bg); border-color: var(--no);
                 color: var(--no); }
 
+  /* ---- document pane ---- */
+  #cols { display: contents; }        /* pane off: main keeps its layout */
+  body.docview #cols {
+    display: flex; align-items: flex-start; gap: 18px;
+    max-width: 1600px; margin: 0 auto; padding: 0 20px;
+  }
+  body.docview nav { max-width: 1600px; }
+  body.docview main { flex: 1.1; min-width: 0; margin: 0 0 90px; padding: 0; }
+  #docpane { display: none; }
+  body.docview #docpane {
+    display: block; flex: 1; min-width: 0;
+    position: sticky; top: calc(var(--hdr, 48px) + var(--navh, 44px));
+    max-height: calc(100vh - var(--hdr, 48px) - var(--navh, 44px) - 16px);
+    overflow: auto; background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 6px;
+  }
+  body.docleft #docpane { order: -1; }   /* pane on the left */
+  #dochdr { position: sticky; top: 0; left: 0; z-index: 1;
+            background: var(--paper); border-bottom: 1px solid var(--rule);
+            font: 12px var(--mono); color: var(--faint);
+            padding: 6px 12px; display: flex; gap: 6px;
+            align-items: center; }
+  #docfile { flex: 1; min-width: 0; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+  .dbtn { font: 11px var(--mono); color: var(--faint);
+          background: var(--paper); border: 1px solid var(--rule);
+          border-radius: 4px; padding: 2px 8px; cursor: pointer;
+          flex: none; }
+  .dbtn.on { color: var(--pencil); border-color: var(--pencil); }
+  #doc { margin: 0; padding: 8px 12px 30px; counter-reset: line;
+         font: 12px/1.7 var(--mono); }
+  #doc .ln {                       /* one block per source line */
+    display: block; position: relative; padding-left: 3.8em;
+    min-height: 1.7em;             /* keep empty lines visible */
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #doc.nowrap { min-width: max-content; }  /* pane scrolls horizontally */
+  #doc.nowrap .ln { white-space: pre; word-break: normal; }
+  #doc .ln::before { counter-increment: line; content: counter(line);
+    position: absolute; left: 0; width: 2.8em;
+    text-align: right; color: #b8b3a6; user-select: none; }
+  #doc mark { border-radius: 2px; cursor: pointer; color: inherit; }
+  #doc mark.st-pending  { background: var(--warn-bg); }
+  #doc mark.st-accepted { background: var(--ok-bg); }
+  #doc mark.st-rejected { background: var(--no-bg); }
+  #doc mark.st-applied  { background: #e3e6ea; }
+  #doc mark.sel { outline: 2px solid var(--pencil); }
+  #docBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
+  @media (max-width: 1100px) {
+    body.docview #cols { display: contents; }
+    body.docview main { margin: 0 auto 90px; padding: 0 20px; }
+    body.docview #docpane { display: none; }
+  }
+
   #toast { position: fixed; left: 50%; bottom: 24px;
            transform: translateX(-50%);
            background: var(--ink); color: #fff; padding: 10px 18px;
@@ -182,7 +262,6 @@ window.MathJax = {
     .card { grid-template-columns: 1fr; }
     .note { border-left: 0; border-top: 1px dotted #b9b3a4;
             padding: 10px 0 0; }
-    nav .keys { display: none; }
     .meter { display: none; }
   }
   @media (prefers-reduced-motion: no-preference) {
@@ -199,7 +278,7 @@ window.MathJax = {
     <i class="A"></i><i class="R"></i><i class="D"></i>
   </div>
   <div id="counts"></div>
-  <button id="applyBtn">Apply accepted</button>
+  <button id="applyBtn">Apply accepted<kbd>A</kbd></button>
 </header>
 
 <nav>
@@ -208,19 +287,47 @@ window.MathJax = {
   <button class="tab" data-f="accepted">Accepted</button>
   <button class="tab" data-f="rejected">Rejected</button>
   <span id="tagbar" title="filter by tag"></span>
-  <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX</button>
+  <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX<kbd>m</kbd></button>
+  <button class="tab" id="docBtn" title="show the full document beside the list">⧉&nbsp;Doc<kbd>d</kbd></button>
   <label class="ctxctl" title="context lines shown around each change">
-    ±<input id="ctx" type="number" min="0" max="99" step="1"> lines
+    ±<input id="ctx" type="number" min="0" max="99" step="1"> lines<kbd>+/−</kbd>
   </label>
-  <span class="keys">
-    <b>j</b>/<b>k</b> move · <b>a</b> accept · <b>r</b> reject ·
-    <b>u</b> undo · <b>m</b> math · <b>+</b>/<b>−</b> context ·
-    <b>A</b> apply
-  </span>
+  <button class="tab" id="helpBtn" title="help &amp; shortcuts">?</button>
 </nav>
 
+<div id="cols">
 <main><div id="list"></div><div id="empty" hidden></div></main>
+<aside id="docpane">
+  <div id="dochdr">
+    <span id="docfile"></span>
+    <button id="wrapBtn" class="dbtn" title="toggle line wrapping">wrap</button>
+    <button id="sideBtn" class="dbtn" title="move pane to the other side">⇄ side</button>
+  </div>
+  <pre id="doc"></pre>
+</aside>
+</div>
 <div id="toast" role="status"></div>
+
+<dialog id="help">
+  <button class="close" title="close">✕</button>
+  <h2>tex·review</h2>
+  <p>An agent proposes edits as JSON; nothing touches your files until
+     you decide. Accept or reject each suggestion, then
+     <b>Apply accepted</b> rewrites the manuscript (a one-time
+     <code>.bak</code> is kept next to each file). Filter by status or
+     tag; the directory is re-scanned on every refresh, so an agent can
+     keep adding passes while you review.</p>
+  <table>
+    <tr><td><kbd>j</kbd>/<kbd>k</kbd></td><td>next / previous suggestion</td></tr>
+    <tr><td><kbd>a</kbd> <kbd>r</kbd></td><td>accept / reject, then advance</td></tr>
+    <tr><td><kbd>u</kbd></td><td>back to pending</td></tr>
+    <tr><td><kbd>+</kbd>/<kbd>−</kbd></td><td>more / less context around each change</td></tr>
+    <tr><td><kbd>m</kbd></td><td>render TeX in notes &amp; previews (the diff stays verbatim)</td></tr>
+    <tr><td><kbd>d</kbd></td><td>document pane — full file with every suggestion highlighted</td></tr>
+    <tr><td><kbd>A</kbd></td><td>apply all accepted suggestions</td></tr>
+    <tr><td><kbd>?</kbd></td><td>this help (<kbd>Esc</kbd> closes)</td></tr>
+  </table>
+</dialog>
 
 <script>
 "use strict";
@@ -233,6 +340,10 @@ let CTX = (() => {        // context lines around each change, persisted
   const n = parseInt(localStorage.getItem("texreview.ctx") ?? "1", 10);
   return Number.isFinite(n) ? Math.max(0, Math.min(99, n)) : 1;
 })();
+let DOCVIEW = localStorage.getItem("texreview.doc") === "1";
+let DOCLEFT = localStorage.getItem("texreview.docside") === "left";
+let WRAP = localStorage.getItem("texreview.wrap") !== "0";
+let DOC = { fkey: null, text: null, stale: true };  // document pane cache
 
 /* typeset only margin notes and previews — never the source diff */
 let mjq = Promise.resolve();
@@ -331,10 +442,11 @@ function card(s) {
     ${prev}
     <div class="acts">
       <button class="act acc ${s.status === "accepted" ? "on" : ""}"
-              data-do="accepted">✓ Accept</button>
+              data-do="accepted">✓ Accept<kbd>a</kbd></button>
       <button class="act rej ${s.status === "rejected" ? "on" : ""}"
-              data-do="rejected">✕ Reject</button>
-      <button class="act" data-do="pending">↩ Undo</button>
+              data-do="rejected">✕ Reject<kbd>r</kbd></button>
+      <button class="act" data-do="pending">↩ Undo<kbd>u</kbd></button>
+      <span class="keyhint">j/k move</span>
     </div>
   </article>`;
 }
@@ -382,7 +494,75 @@ function render() {
   $("#source").textContent = STATE.source || "";
   const sel = document.querySelector(".card.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
+  renderDoc();
   typeset();
+}
+
+/* ---- document pane ---- */
+function applyDocPrefs() {
+  document.body.classList.toggle("docview", DOCVIEW);
+  document.body.classList.toggle("docleft", DOCLEFT);
+  $("#docBtn").classList.toggle("on", DOCVIEW);
+  $("#doc").classList.toggle("nowrap", !WRAP);
+  $("#wrapBtn").classList.toggle("on", WRAP);
+  $("#wrapBtn").textContent = WRAP ? "wrap" : "no-wrap";
+}
+function toggleDoc() {
+  DOCVIEW = !DOCVIEW;
+  localStorage.setItem("texreview.doc", DOCVIEW ? "1" : "0");
+  applyDocPrefs();
+  render();
+}
+
+function docHTML(text, subs) {
+  // wrap each suggestion's [start, end) span in a <mark>, splitting
+  // marks at newlines so lines can be numbered afterwards
+  let out = "", pos = 0;
+  for (const s of subs) {
+    if (s.start < pos) continue;               // overlapping span
+    out += esc(text.slice(pos, s.start));
+    const cls = `st-${s.status}${s.id === SEL ? " sel" : ""}`;
+    const open = `<mark class="${cls}" data-id="${esc(s.id)}">`;
+    out += open +
+      esc(text.slice(s.start, s.end)).split("\n").join(`</mark>\n${open}`) +
+      "</mark>";
+    pos = s.end;
+  }
+  out += esc(text.slice(pos));
+  // one block-level span per line (hanging indent past the gutter)
+  return out.split("\n").map(l => `<span class="ln">${l}</span>`).join("");
+}
+
+let docReq = 0;
+async function renderDoc() {
+  if (!DOCVIEW) return;
+  const s = STATE.suggestions.find(x => x.id === SEL);
+  if (!s) {
+    $("#docfile").textContent = "";
+    $("#doc").textContent = "";
+    return;
+  }
+  if (DOC.stale || DOC.fkey !== s.fkey) {
+    const req = ++docReq;
+    const r = await fetch(`/api/file?id=${encodeURIComponent(s.id)}`);
+    if (req !== docReq) return;                // superseded
+    DOC = { fkey: s.fkey, stale: false,
+            text: r.ok ? (await r.json()).text : null };
+  }
+  $("#docfile").textContent = s.file;
+  if (DOC.text === null) {
+    $("#doc").textContent = "(file unreadable)";
+    return;
+  }
+  const subs = STATE.suggestions
+    .filter(x => x.fkey === s.fkey && x.match.start >= 0 &&
+                 (x.match.state === "ok" || x.match.state === "overlap"))
+    .map(x => ({ id: x.id, start: x.match.start, end: x.match.end,
+                 status: x.status }))
+    .sort((a, b) => a.start - b.start);
+  $("#doc").innerHTML = docHTML(DOC.text, subs);
+  const m = document.querySelector("#doc mark.sel");
+  if (m) m.scrollIntoView({ block: "center" });
 }
 
 function setCtx(n) {
@@ -397,6 +577,7 @@ function setCtx(n) {
 /* ---- api ---- */
 async function refresh() {
   STATE = await (await fetch(`/api/state?ctx=${CTX}`)).json();
+  DOC.stale = true;   // files may have changed (e.g. after apply)
   if (SEL === null && STATE.suggestions.length)
     SEL = (STATE.suggestions.find(s => s.status === "pending")
            || STATE.suggestions[0]).id;
@@ -431,6 +612,12 @@ function toast(msg) {
 /* ---- interaction ---- */
 document.addEventListener("click", e => {
   if (e.target.closest("#texBtn")) { toggleTex(); return; }
+  if (e.target.closest("#docBtn")) { toggleDoc(); return; }
+  if (e.target.closest("#helpBtn")) { $("#help").showModal(); return; }
+  if (e.target.closest("#help .close")) { $("#help").close(); return; }
+  if (e.target === $("#help")) { $("#help").close(); return; }  // backdrop
+  const mk = e.target.closest("#doc mark[data-id]");
+  if (mk) { SEL = mk.dataset.id; render(); return; }
   const tagEl = e.target.closest("[data-tag]");
   if (tagEl) { setTag(tagEl.dataset.tag); return; }
   const tab = e.target.closest(".tab");
@@ -467,12 +654,15 @@ function decideAndAdvance(status) {
 document.addEventListener("keydown", e => {
   if (e.target.matches("input, textarea") || e.metaKey || e.ctrlKey) return;
   const k = e.key;
+  if ($("#help").open) return;                 // Esc closes natively
+  if (k === "?") { $("#help").showModal(); return; }
   if (k === "j" || k === "ArrowDown") { move(1); e.preventDefault(); }
   else if (k === "k" || k === "ArrowUp") { move(-1); e.preventDefault(); }
   else if (k === "a") decideAndAdvance("accepted");
   else if (k === "r") decideAndAdvance("rejected");
   else if (k === "u") decide(SEL, "pending");
   else if (k === "m") toggleTex();
+  else if (k === "d") toggleDoc();
   else if (k === "+" || k === "=") setCtx(CTX + 1);
   else if (k === "-") setCtx(CTX - 1);
   else if (k === "A") applyAll();
@@ -481,14 +671,31 @@ document.addEventListener("keydown", e => {
 $("#ctx").value = CTX;
 $("#ctx").addEventListener("change", e => setCtx(+e.target.value));
 
-/* keep the sticky toolbar flush under the (variable-height) header */
+/* keep the sticky toolbar flush under the (variable-height) header,
+   and the doc pane flush under both */
 {
   const hdr = document.querySelector("header");
-  const sync = () => document.documentElement.style.setProperty(
-    "--hdr", hdr.offsetHeight + "px");
+  const nv = document.querySelector("nav");
+  const sync = () => {
+    const st = document.documentElement.style;
+    st.setProperty("--hdr", hdr.offsetHeight + "px");
+    st.setProperty("--navh", nv.offsetHeight + "px");
+  };
   new ResizeObserver(sync).observe(hdr);
+  new ResizeObserver(sync).observe(nv);
   sync();
 }
+$("#wrapBtn").addEventListener("click", () => {
+  WRAP = !WRAP;
+  localStorage.setItem("texreview.wrap", WRAP ? "1" : "0");
+  applyDocPrefs();
+});
+$("#sideBtn").addEventListener("click", () => {
+  DOCLEFT = !DOCLEFT;
+  localStorage.setItem("texreview.docside", DOCLEFT ? "left" : "right");
+  applyDocPrefs();
+});
+applyDocPrefs();
 
 refresh();
 </script>

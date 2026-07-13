@@ -58,6 +58,14 @@ Remaining:
 
 ## Phase 4 — Nice-to-haves (unordered)
 
+- TeX syntax highlighting in the document pane. The pane is a plain
+  `<pre>` by design (zero deps, verbatim bytes); we _could_ layer
+  highlighting on top, either a small hand-rolled tokenizer
+  (comments, `\commands`, math `$...$`, braces) or CodeMirror 5
+  (single UMD file) loaded like MathJax: local copy first, CDN
+  fallback, plain text if neither. CM6 is out — ESM module tree, no
+  clean no-build story.
+
 - `--base-dir` override on the CLI.
 - Apply report persisted (e.g. `review/applied.log`) for audit.
 - Dark mode / print-friendly stylesheet.

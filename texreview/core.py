@@ -226,6 +226,7 @@ def annotate(store: Store, ctx: int = 1) -> list[dict]:
         if m.state == "ok" and s["status"] != "applied":
             spans.setdefault(fkey, []).append((m.start, m.end, s["id"]))
         row = {k: v for k, v in s.items() if k != "_base"}
+        row["fkey"] = "|".join(fkey)   # opaque per-file key for the UI
         row["match"] = m.__dict__
         out.append(row)
     # overlap: only matters between two *accepted* suggestions

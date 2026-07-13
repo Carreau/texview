@@ -42,6 +42,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, p.read_bytes(), ctype)
             else:  # no local copy: index.html falls back to the CDN
                 self._send(404, b"not found", "text/plain")
+        elif urlparse(self.path).path == "/api/file":
+            # full text of the file a suggestion points at; resolved via
+            # the store (same containment guard as file_text), so no
+            # client-supplied paths
+            sid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            with self.store.lock:
+                s = self.store.suggestion(sid)
+                if s is None:
+                    return self._json({"error": "unknown id"}, 404)
+                text = self.store.file_text(s)
+                if text is None:
+                    return self._json({"error": "file unreadable"}, 404)
+                self._json({"file": s.get("file", ""), "text": text})
         elif urlparse(self.path).path == "/api/state":
             q = parse_qs(urlparse(self.path).query)
             try:

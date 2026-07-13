@@ -53,7 +53,9 @@ Pointing the tool at a single `suggestions.json` file still works
 
    Keyboard: `j`/`k` move, `a` accept, `r` reject, `u` back to pending,
    `+`/`-` more/less context around each change (also a `± N lines`
-   toolbar input; remembered by the browser), `A` apply. Accept/reject auto-advances to the next pending item. The
+   toolbar input; remembered by the browser), `d` a side pane showing
+   the whole document with every suggestion highlighted (click a
+   highlight to jump to its card), `A` apply. Accept/reject auto-advances to the next pending item. The
    directory is re-scanned on every refresh, so an agent can keep adding
    passes while you review.
 3. Click **Apply accepted** (or `tex-review apply ...`). Each
