@@ -11,7 +11,8 @@ the directory if it doesn't exist), named `NNNN-<short-name>.json`,
 where `NNNN` is the next free 4-digit number (e.g.
 `0001-grammar-pass.json`, `0003-notation-pass.json`). Never modify or
 delete existing files in `review/` — each pass is append-only, and
-`decisions.json` in that directory belongs to the human reviewer.
+`decisions.json`, `manual.json` and `comments.json` in that directory
+belong to the human reviewer.
 
 ## File format
 
@@ -32,6 +33,21 @@ delete existing files in `review/` — each pass is append-only, and
   ]
 }
 ```
+
+Optionally set `author` (your name/model, self-declared) and `date`
+(ISO 8601) on each suggestion. To respond to a suggestion from an
+earlier pass — e.g. to answer a reviewer's comment — add a top-level
+`"replies"` array to your (new) pass file instead of re-emitting it:
+
+```json
+"replies": [
+  {"to": "s001", "text": "Agreed, but note the theorem numbering.",
+   "author": "agent-pass-3", "date": "2026-07-13T09:00:00Z"}
+]
+```
+
+`to` is the target suggestion's id (or its content key as reported by
+the tool). Replies never modify the suggestion itself.
 
 Fields per suggestion:
 

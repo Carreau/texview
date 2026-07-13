@@ -24,7 +24,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DECISIONS = "decisions.json"
+MANUAL = "manual.json"     # tool-owned pass file for human-created items
+COMMENTS = "comments.json"  # tool-owned: content_key -> [reply, ...]
 VALID_STATUSES = {"pending", "accepted", "rejected", "applied"}
+EDITABLE = ("new", "reasoning", "tags")   # human-editable fields
 
 
 def content_key(s: dict) -> str:
@@ -51,6 +54,7 @@ class Store:
         self.lock = threading.Lock()
         self.suggestions: list[dict] = []
         self.single_doc: dict = {}
+        self.overrides: dict[str, dict] = {}   # key -> human edits (dir)
         self.reload()
 
     # -- loading ------------------------------------------------------
@@ -64,6 +68,8 @@ class Store:
     def _normalize(self, items, default_id, base: Path, source: str,
                    statuses: dict | None) -> None:
         for i, s in enumerate(items):
+            s = dict(s)   # don't pollute the caller's dicts (they may be
+            #               written back verbatim in single-file mode)
             s["key"] = content_key(s)
             s.setdefault("id", f"{default_id}#{i + 1}")
             s["source"] = source
@@ -76,12 +82,24 @@ class Store:
 
     def _load_dir(self) -> None:
         dpath = self.path / DECISIONS
-        statuses = {}
+        # decisions.json values: either a bare status string, or
+        # {"status": ..., "new"/"reasoning"/"tags": ...} when the human
+        # edited the suggestion (pass files stay read-only)
+        statuses, self.overrides = {}, {}
         if dpath.is_file():
-            statuses = json.loads(dpath.read_text(encoding="utf-8"))
+            for k, v in json.loads(
+                    dpath.read_text(encoding="utf-8")).items():
+                if isinstance(v, dict):
+                    statuses[k] = v.get("status", "pending")
+                    ov = {f: v[f] for f in EDITABLE if f in v}
+                    if ov:
+                        self.overrides[k] = ov
+                else:
+                    statuses[k] = v
         self.suggestions = []
+        pass_replies = []          # (to, reply) from pass files' "replies"
         for f in sorted(self.path.glob("*.json")):
-            if f.name == DECISIONS or f.name.endswith(".tmp"):
+            if f.name in (DECISIONS, COMMENTS) or f.name.endswith(".tmp"):
                 continue
             try:
                 raw = json.loads(f.read_text(encoding="utf-8"))
@@ -93,6 +111,12 @@ class Store:
             else:
                 items = raw.get("suggestions", [])
                 rel = raw.get("base_dir", "..")
+                for rep in raw.get("replies", []):
+                    if isinstance(rep, dict) and rep.get("to") \
+                            and rep.get("text"):
+                        pass_replies.append((rep["to"], {
+                            k: rep[k] for k in
+                            ("text", "author", "date") if k in rep}))
             base = (f.parent / rel).resolve()
             self._normalize(items, f.stem, base, f.name, statuses)
         # dedupe re-emitted suggestions (same content key): keep first
@@ -107,6 +131,33 @@ class Store:
             ids.add(s["id"])
             uniq.append(s)
         self.suggestions = uniq
+        for s in self.suggestions:      # human edits win over pass content
+            ov = self.overrides.get(s["key"])
+            if ov:
+                s.update(ov)
+                s["edited"] = True
+        # thread replies: pass-file "replies" (to = id or content key)
+        # + tool-owned comments.json (keyed by content key)
+        cpath = self.path / COMMENTS
+        comments = {}
+        if cpath.is_file():
+            comments = json.loads(cpath.read_text(encoding="utf-8"))
+        id_to_key = {s["id"]: s["key"] for s in self.suggestions}
+        keys = set(id_to_key.values())
+        merged: dict = {}
+        for to, rep in pass_replies:
+            k = to if to in keys else id_to_key.get(to)
+            if k:
+                merged.setdefault(k, []).append(rep)
+        for k, reps in comments.items():
+            # human replies are editable; ci = index in comments.json
+            merged.setdefault(k, []).extend(
+                {**r, "editable": True, "ci": i}
+                for i, r in enumerate(reps))
+        for s in self.suggestions:
+            reps = list(s.get("replies", [])) + merged.get(s["key"], [])
+            if reps:
+                s["replies"] = sorted(reps, key=lambda r: r.get("date", ""))
 
     def _load_single(self) -> None:
         self.single_doc = json.loads(self.path.read_text(encoding="utf-8"))
@@ -115,6 +166,10 @@ class Store:
         self.suggestions = []
         self._normalize(self.single_doc.get("suggestions", []),
                         "s", base, self.path.name, statuses=None)
+        for s in self.suggestions:      # inline replies are editable
+            if s.get("replies"):
+                s["replies"] = [{**r, "editable": True, "ci": i}
+                                for i, r in enumerate(s["replies"])]
 
     # -- saving -------------------------------------------------------
 
@@ -129,8 +184,13 @@ class Store:
 
     def save(self) -> None:
         if self.dir_mode:
-            decided = {s["key"]: s["status"] for s in self.suggestions
-                       if s["status"] != "pending"}
+            decided = {}
+            for s in self.suggestions:
+                ov = self.overrides.get(s["key"])
+                if ov:
+                    decided[s["key"]] = {"status": s["status"], **ov}
+                elif s["status"] != "pending":
+                    decided[s["key"]] = s["status"]
             self._write(self.path / DECISIONS, decided)
         else:
             for s in self.single_doc.get("suggestions", []):
@@ -138,6 +198,138 @@ class Store:
                 if live:
                     s["status"] = live["status"]
             self._write(self.path, self.single_doc)
+
+    # -- manual suggestions (human-created, via the UI) ---------------
+
+    def manual_base(self) -> Path:
+        """base_dir a manual suggestion's `file` is relative to."""
+        if self.dir_mode:
+            return (self.path / "..").resolve()
+        return (self.path.parent
+                / self.single_doc.get("base_dir", ".")).resolve()
+
+    def add_manual(self, s: dict) -> dict:
+        """Append a human-created suggestion and reload.
+
+        Directory mode: goes into <dir>/manual.json (tool-owned; agent
+        pass files stay untouched). Single-file mode: appended to the
+        file itself. Returns the live (deduped) suggestion.
+        """
+        if self.dir_mode:
+            p = self.path / MANUAL
+            doc = {"version": 1, "base_dir": "..", "suggestions": []}
+            if p.is_file():
+                raw = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    doc["suggestions"] = raw
+                else:
+                    doc = raw
+                    doc.setdefault("suggestions", [])
+            items, target, payload = doc["suggestions"], p, doc
+        else:
+            items = self.single_doc.setdefault("suggestions", [])
+            target, payload = self.path, self.single_doc
+        taken = {x.get("id") for x in items} | {
+            x["id"] for x in self.suggestions}
+        n = 1
+        while f"m{n:03d}" in taken:
+            n += 1
+        s = {**s, "id": f"m{n:03d}"}
+        items.append(s)
+        self._write(target, payload)
+        self.reload()
+        return self.suggestion_by_key(content_key(s)) or s
+
+    def edit(self, sid: str, fields: dict) -> dict | None:
+        """Human-edit a suggestion's `new`/`reasoning`/`tags`.
+
+        Directory mode: stored as an override in decisions.json, keyed
+        by the suggestion's original content key — pass files stay
+        read-only and edits survive re-emission. Single-file mode:
+        written into the file itself. `old`/`occurrence` are identity
+        and cannot change.
+        """
+        s = self.suggestion(sid)
+        if s is None:
+            return None
+        fields = {f: fields[f] for f in EDITABLE if f in fields}
+        if self.dir_mode:
+            self.overrides.setdefault(s["key"], {}).update(fields)
+            s.update(fields)
+            s["edited"] = True
+            self.save()
+        else:
+            for raw in self.single_doc.get("suggestions", []):
+                if content_key(raw) == s["key"]:
+                    raw.update(fields)
+                    break
+            self._write(self.path, self.single_doc)
+            self.reload()
+        return self.suggestion(sid)
+
+    def add_reply(self, sid: str, reply: dict) -> dict | None:
+        """Attach a reply to a suggestion (comments.json / the single
+        file). `reply` = {text, author, date}; authorship is trusted,
+        not authenticated."""
+        s = self.suggestion(sid)
+        if s is None:
+            return None
+        if self.dir_mode:
+            cpath = self.path / COMMENTS
+            comments = {}
+            if cpath.is_file():
+                comments = json.loads(cpath.read_text(encoding="utf-8"))
+            comments.setdefault(s["key"], []).append(reply)
+            self._write(cpath, comments)
+        else:
+            for raw in self.single_doc.get("suggestions", []):
+                if content_key(raw) == s["key"]:
+                    raw.setdefault("replies", []).append(reply)
+                    break
+            self._write(self.path, self.single_doc)
+        self.reload()
+        return self.suggestion(sid)
+
+    def edit_reply(self, sid: str, ci: int, text: str):
+        """Edit (or, with empty text, delete) a human reply. `ci` is
+        the reply's index in comments.json / the item's inline list.
+        Agent replies (from pass files) are not editable."""
+        s = self.suggestion(sid)
+        if s is None:
+            return None
+        if self.dir_mode:
+            cpath = self.path / COMMENTS
+            comments = {}
+            if cpath.is_file():
+                comments = json.loads(cpath.read_text(encoding="utf-8"))
+            lst = comments.get(s["key"], [])
+            if not 0 <= ci < len(lst):
+                return None
+            if text:
+                lst[ci]["text"] = text
+            else:
+                del lst[ci]
+                if not lst:
+                    comments.pop(s["key"], None)
+            self._write(cpath, comments)
+        else:
+            for raw in self.single_doc.get("suggestions", []):
+                if content_key(raw) == s["key"]:
+                    lst = raw.get("replies", [])
+                    if not 0 <= ci < len(lst):
+                        return None
+                    if text:
+                        lst[ci]["text"] = text
+                    else:
+                        del lst[ci]
+                        if not lst:
+                            raw.pop("replies", None)
+                    break
+            else:
+                return None
+            self._write(self.path, self.single_doc)
+        self.reload()
+        return True
 
     # -- lookups ------------------------------------------------------
 

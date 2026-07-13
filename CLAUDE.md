@@ -48,8 +48,23 @@ Installable package (flit, `pyproject.toml`, console script
 
 1. **Directory mode (primary):** serve a `review/` dir. Each
    `NNNN-name.json` is one agent pass. Human decisions live in
-   `review/decisions.json`, a map `content_key -> status`, where
-   `content_key = sha1(file, old, new, occurrence)[:12]`. Consequences
+   `review/decisions.json`, a map `content_key -> status | {status,
+   new?, reasoning?, tags?}` (the dict form holds human edits — they
+   override pass content at load, keyed by the suggestion's original
+   content key, so pass files stay read-only and edits survive
+   re-emission). `content_key = sha1(file, old, new, occurrence)[:12]`
+   over the *original* pass values; `old`/`occurrence` are identity
+   and never editable.
+   Human-created suggestions (UI "＋ suggest") go into
+   `review/manual.json` — tool-owned like `decisions.json`, but loaded
+   as a regular pass; agent pass files stay read-only.
+   Replies (threaded comments per suggestion, `{text, author, date}`,
+   authorship trusted not authenticated): human ones live in tool-owned
+   `review/comments.json` keyed by content key; agents reply via a
+   top-level `"replies": [{to: <id|key>, ...}]` array in a *new* pass
+   file. Merged and date-sorted into `suggestion["replies"]` at load;
+   suggestions may also carry optional `author`/`date` (manual ones are
+   stamped with `getpass.getuser()` + UTC time). Consequences
    to preserve: decisions survive re-emitted suggestions; identical
    suggestions across passes are deduped (first wins); deleting a pass
    file is a valid operation. The dir is re-scanned on every
@@ -86,12 +101,30 @@ Installable package (flit, `pyproject.toml`, console script
 - `GET /api/file?id=<sid>` → `{file, text}`: full text of the file the
   suggestion points at, resolved through the store (no client paths).
 - `POST /api/decide {id, status}` (status ∈ pending/accepted/rejected).
+- `POST /api/suggest {file, old, new, occurrence?, reasoning?, tags?}`
+  → `{id}`: create a human-authored suggestion (validated: anchor must
+  resolve `ok`; identical existing suggestion → `{id, existing: true}`).
+  Stored via `Store.add_manual` (manual.json / the single file).
+- `POST /api/reply {id, text, author?}` → append a reply (author
+  defaults to the OS username; date stamped server-side).
+- `POST /api/reply_edit {id, ci, text}` → edit a *human* reply (`ci` =
+  its index in comments.json / the item's inline list, surfaced as
+  `ci` + `editable: true` on the reply); empty text deletes it. Agent
+  replies (from pass files) are not editable.
+- `POST /api/edit {id, new?, reasoning?, tags?}`: human-edit any
+  non-applied suggestion via `Store.edit` (decisions.json override in
+  dir mode, in-place in single-file mode); sets `edited: true`.
 - `POST /api/apply` → `{applied: [...], skipped: [{id, reason}]}`.
 
 ## UI notes
 
 - Keyboard: `j/k` move, `a/r` decide + auto-advance, `u` undo, `m`
   toggle math, `d` document pane, `+/-` context lines, `A` apply.
+  `e` (or the card's `✎ Edit`) opens the same dialog as `＋ suggest`
+  to edit replacement/tags/comment of any non-applied suggestion;
+  edited cards get an `✎ edited` chip. The dialog offers every tag
+  already in use as click-to-toggle chips. A floating `＋` follows the
+  document-pane selection (in addition to the header button).
   No shortcut legend in the toolbar: keys are shown as `<kbd>` badges
   on the buttons they trigger (`a/r/u` + a `j/k` hint only on the
   selected card; `A`, `m`, `d`, `+/−` on their controls). A round `?`
@@ -100,8 +133,19 @@ Installable package (flit, `pyproject.toml`, console script
   shortcuts are ignored while it is open.
   Filters:
   all/pending/accepted/rejected, plus tag chips in the toolbar (click
-  to filter by tag, click again to clear; card tag chips work too;
-  combines with the status filter). The `± N lines` toolbar input sets
+  to filter by tag, click again to clear; card tag chips work too) and
+  a per-file `<select>` (keyed by `fkey`, hidden when only one file
+  has suggestions; choosing a file moves the selection — and the doc
+  pane — into it). Status ∩ tag ∩ file all combine.
+- Reply threads are a full-width `.thread` section between diff/note
+  and the action buttons; the selected card has an inline reply input
+  (Enter posts to `/api/reply`). Human replies show a hover `✎` that
+  swaps the text for an inline input (Enter saves, empty deletes, Esc
+  cancels → `/api/reply_edit`). The toolbar `✎` input overrides the author name for
+  replies/created suggestions (sessionStorage `texreview.user`;
+  placeholder = server-side `getpass.getuser()`, sent via
+  `GET /api/state` as `user`). Clicks inside `.rbox` are excluded from the card
+  click handler so typing doesn't trigger a rerender. The `± N lines` toolbar input sets
   diff context (persisted in localStorage as `texreview.ctx`).
 - Word-level diff = LCS over whitespace-preserving tokens (JS, capped;
   falls back to plain del/ins blocks on huge edits).
@@ -110,8 +154,17 @@ Installable package (flit, `pyproject.toml`, console script
   whole file verbatim with line numbers; all suggestion spans in that
   file are `<mark>`ed by status, selection syncs both ways (card ↔
   mark click), refetched when state reloads. Pane-header buttons:
-  `wrap`/`no-wrap` (horizontal scroll) and `⇄ side` (left/right),
-  both persisted (`texreview.wrap`, `texreview.docside`). Each line
+  `＋ suggest` (enabled while text is selected in the pane: maps the
+  selection to file offsets via a sentinel node, verifies against the
+  cached text, then a dialog edits replacement/tags/comment and POSTs
+  `/api/suggest`), `wrap`/`no-wrap` (horizontal scroll), and `⇄ side`
+  (left/right), the latter two persisted (`texreview.wrap`,
+  `texreview.docside`). An overview ruler (right strip, `#ruler`)
+  shows one status-colored marker per suggestion plus a viewport
+  thumb; click/drag seeks, clicking a marker selects that suggestion.
+  The pane is a flex column (`#dochdr` / `#docmid` = scrolling
+  `#docbody` + `#ruler`), so the ruler and header never scroll.
+  Each line
   is a block-level `.ln` span with an absolutely-positioned gutter
   number, so wrapped continuations indent past the gutter; marks are
   split at newlines so they never cross `.ln` boundaries. Plain text by design —

@@ -55,7 +55,11 @@ Pointing the tool at a single `suggestions.json` file still works
    `+`/`-` more/less context around each change (also a `± N lines`
    toolbar input; remembered by the browser), `d` a side pane showing
    the whole document with every suggestion highlighted (click a
-   highlight to jump to its card), `A` apply. Accept/reject auto-advances to the next pending item. The
+   highlight to jump to its card), `A` apply, `?` help. In the
+   document pane you can also select any text and hit **＋ suggest**
+   to write a suggestion of your own (replacement, tags, comment); it
+   lands in `review/manual.json` and is reviewed/applied like any
+   other. Accept/reject auto-advances to the next pending item. The
    directory is re-scanned on every refresh, so an agent can keep adding
    passes while you review.
 3. Click **Apply accepted** (or `tex-review apply ...`). Each
@@ -97,6 +101,14 @@ A bare JSON list of suggestion objects is also accepted.
 | `reasoning`  | no       | shown as a margin note in the UI            |
 | `tags`       | no       | e.g. `["grammar"]` — shown as chips         |
 | `id`         | no       | auto-filled from filename if missing        |
+| `author`, `date` | no   | who proposed it (self-declared) and when (ISO 8601) |
+
+A pass file may also carry a top-level `"replies"` array —
+`{"to": "<id or content key>", "text": "...", "author": "...",
+"date": "..."}` — to respond to suggestions from earlier passes.
+Replies you write in the UI land in `review/comments.json` with your
+username and a timestamp (trusted, not authenticated); threads show
+under each suggestion's margin note, sorted by date.
 | `base_dir`   | no       | relative to the pass file; defaults to `..` (i.e. `review/` sits inside the manuscript root) |
 
 ## Instructions to give your agent

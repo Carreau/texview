@@ -45,10 +45,10 @@ Remaining:
 
 ## Phase 3 — Review-flow features
 
-- **Inline editing of `new`** before accepting. Requires
-  `decisions.json` values richer than a bare status string, e.g.
-  `{"status": "accepted", "new": "edited text"}`; keep reading the old
-  bare-string format forever.
+- ~~**Inline editing of `new`** before accepting.~~ Done: `✎ Edit` /
+  `e` edits `new`/`reasoning`/`tags` of any non-applied suggestion;
+  stored as `{"status": ..., "new": ...}` dicts in `decisions.json`
+  (bare-string form still read forever), in-place in single-file mode.
 - **Revert** of an applied suggestion: inverse replace while `new`
   still matches uniquely; status back to `accepted` (or a new
   `reverted`).

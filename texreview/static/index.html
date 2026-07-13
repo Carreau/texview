@@ -82,6 +82,11 @@ window.MathJax = {
         background: var(--desk);
         max-width: 1060px; margin: 0 auto; padding: 16px 20px 8px;
         display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  #fileSel { font: 12px var(--mono); color: var(--faint);
+             background: none; border: 0;
+             border-bottom: 2px solid transparent; padding: 4px 0;
+             max-width: 15em; cursor: pointer; }
+  #fileSel.on { color: var(--ink); border-bottom-color: var(--pencil); }
   #tagbar { display: inline-flex; flex-wrap: wrap; gap: 6px;
             align-items: center; }
   .tagf { font: 11px/1 var(--sans); padding: 4px 9px; border-radius: 999px;
@@ -106,23 +111,37 @@ window.MathJax = {
              border-radius: 999px; width: 24px; height: 24px;
              padding: 0; text-align: center; align-self: center; }
 
-  /* ---- help dialog ---- */
-  #help { border: 1px solid var(--rule); border-radius: 8px;
-          background: var(--paper); color: var(--ink);
-          max-width: 30rem; padding: 20px 24px;
-          font: 13px/1.6 var(--sans); }
-  #help::backdrop { background: rgba(31, 35, 40, .45); }
-  #help h2 { margin: 0 0 6px; font: 600 15px var(--sans); }
-  #help p { margin: 6px 0; color: #3d4147; }
+  /* ---- dialogs (help, new suggestion) ---- */
+  dialog { border: 1px solid var(--rule); border-radius: 8px;
+           background: var(--paper); color: var(--ink);
+           max-width: 30rem; padding: 20px 24px;
+           font: 13px/1.6 var(--sans); }
+  dialog::backdrop { background: rgba(31, 35, 40, .45); }
+  dialog h2 { margin: 0 0 6px; font: 600 15px var(--sans); }
+  dialog p { margin: 6px 0; color: #3d4147; }
+  dialog .close { float: right; border: 0; background: none;
+                  font: 16px var(--sans); cursor: pointer;
+                  color: var(--faint); }
+
+  #newsug { width: 30rem; }
+  #newsug label { display: block; margin: 10px 0 3px;
+                  font: 600 11px var(--sans); color: var(--faint);
+                  text-transform: uppercase; letter-spacing: .06em; }
+  #newsug textarea, #newsug input[type=text] {
+    width: 100%; font: 12px/1.5 var(--mono); color: var(--ink);
+    background: #fff; border: 1px solid var(--rule); border-radius: 4px;
+    padding: 6px 8px; resize: vertical; }
+  #nsOld { background: #f7f5f0; color: #57534a; }
+  #nsTagBar { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; }
+  #nsCreate { margin-top: 14px; background: var(--pencil); color: #fff;
+              border: 0; border-radius: 6px; padding: 7px 16px;
+              font: 600 13px var(--sans); cursor: pointer; }
   #help table { border-collapse: collapse; margin-top: 10px; }
   #help td { padding: 2px 14px 2px 0; vertical-align: baseline; }
   #help td:first-child { font: 12px var(--mono); white-space: nowrap; }
   #help kbd { margin: 0 2px 0 0; opacity: 1; color: var(--ink);
               border-color: var(--rule); border-bottom-width: 2px;
               background: #f7f5f0; }
-  #help .close { float: right; border: 0; background: none;
-                 font: 16px var(--sans); cursor: pointer;
-                 color: var(--faint); }
 
   /* ---- cards ---- */
   main { max-width: 1060px; margin: 0 auto 90px; padding: 0 20px; }
@@ -168,6 +187,25 @@ window.MathJax = {
   }
   .note::before { content: attr(data-id) " — "; font: 11px var(--mono);
                   font-style: normal; color: var(--pencil); }
+  /* reply thread: full-width section between diff/note and actions */
+  .thread { grid-column: 1 / -1; border-top: 1px dotted #d8d2c2;
+            padding-top: 6px; display: grid; gap: 6px; }
+  .reply { font: 13px/1.5 var(--sans);
+           padding-left: 14px; border-left: 2px solid #e3ddce; }
+  .rwho { font: 600 11px var(--sans); color: var(--pencil);
+          margin-right: 6px; }
+  .rdate { font: 10px var(--mono); color: var(--faint);
+           margin-right: 6px; }
+  .rbox input, .redit { width: 100%; font: 12px var(--sans);
+                color: var(--ink); background: #fff;
+                border: 1px solid var(--rule);
+                border-radius: 4px; padding: 5px 9px; }
+  .redit { width: auto; flex: 1; }
+  .reply:has(.redit) { display: flex; align-items: center; gap: 6px; }
+  .ract { border: 0; background: none; cursor: pointer; padding: 0 4px;
+          font: 11px var(--sans); color: var(--faint); visibility: hidden; }
+  .reply:hover .ract { visibility: visible; }
+  .byline { font: 10px var(--mono); color: var(--faint); }
 
   /* rendered before/after (MathJax) */
   .prev { grid-column: 1; display: grid; gap: 4px; padding: 7px 10px;
@@ -186,6 +224,8 @@ window.MathJax = {
   .ctxctl input { width: 3.2em; font: 12px var(--mono); color: var(--ink);
                   background: var(--paper); border: 1px solid var(--rule);
                   border-radius: 4px; padding: 2px 4px; text-align: center; }
+  #userIn { width: 9em; text-align: left; }
+  #userIn::placeholder { color: var(--faint); font-style: italic; }
 
   .acts { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 4px; }
   .act { border: 1px solid var(--rule); background: var(--paper);
@@ -206,18 +246,37 @@ window.MathJax = {
   body.docview main { flex: 1.1; min-width: 0; margin: 0 0 90px; padding: 0; }
   #docpane { display: none; }
   body.docview #docpane {
-    display: block; flex: 1; min-width: 0;
+    display: flex; flex-direction: column; flex: 1; min-width: 0;
     position: sticky; top: calc(var(--hdr, 48px) + var(--navh, 44px));
     max-height: calc(100vh - var(--hdr, 48px) - var(--navh, 44px) - 16px);
-    overflow: auto; background: var(--paper);
+    overflow: hidden; background: var(--paper);
     border: 1px solid var(--rule); border-radius: 6px;
   }
+  #docmid { flex: 1; min-height: 0; display: flex; }
+  #docbody { flex: 1; min-width: 0; overflow: auto; }
   body.docleft #docpane { order: -1; }   /* pane on the left */
-  #dochdr { position: sticky; top: 0; left: 0; z-index: 1;
+  #dochdr { flex: none;
             background: var(--paper); border-bottom: 1px solid var(--rule);
             font: 12px var(--mono); color: var(--faint);
             padding: 6px 12px; display: flex; gap: 6px;
             align-items: center; }
+
+  /* ---- overview ruler (minimap strip) ---- */
+  #ruler { flex: none; width: 13px; position: relative;
+           background: #f1efe8; border-left: 1px solid var(--rule);
+           cursor: pointer; }
+  #ruler .rm { position: absolute; left: 2px; right: 2px;
+               border-radius: 2px; cursor: pointer; }
+  #ruler .rm.st-pending  { background: #d9b64a; }
+  #ruler .rm.st-accepted { background: var(--ok); }
+  #ruler .rm.st-rejected { background: var(--no); }
+  #ruler .rm.st-applied  { background: #b7bcc2; }
+  #ruler .rm.sel { left: 0; right: 0;
+                   outline: 1px solid var(--pencil); }
+  #rthumb { position: absolute; left: 0; right: 0;
+            background: rgba(45, 79, 143, .14);
+            border: 1px solid rgba(45, 79, 143, .3);
+            border-radius: 3px; pointer-events: none; }
   #docfile { flex: 1; min-width: 0; overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
   .dbtn { font: 11px var(--mono); color: var(--faint);
@@ -225,6 +284,7 @@ window.MathJax = {
           border-radius: 4px; padding: 2px 8px; cursor: pointer;
           flex: none; }
   .dbtn.on { color: var(--pencil); border-color: var(--pencil); }
+  .dbtn:disabled { opacity: .4; cursor: default; }
   #doc { margin: 0; padding: 8px 12px 30px; counter-reset: line;
          font: 12px/1.7 var(--mono); }
   #doc .ln {                       /* one block per source line */
@@ -243,6 +303,13 @@ window.MathJax = {
   #doc mark.st-rejected { background: var(--no-bg); }
   #doc mark.st-applied  { background: #e3e6ea; }
   #doc mark.sel { outline: 2px solid var(--pencil); }
+  #selAdd {                       /* floating ＋ next to the selection */
+    position: fixed; display: none; z-index: 20;
+    width: 26px; height: 26px; border-radius: 999px; border: 0;
+    background: var(--pencil); color: #fff; font: 700 15px/26px var(--sans);
+    text-align: center; padding: 0; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(31,35,40,.35);
+  }
   #docBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
   @media (max-width: 1100px) {
     body.docview #cols { display: contents; }
@@ -286,11 +353,15 @@ window.MathJax = {
   <button class="tab" data-f="pending">Pending</button>
   <button class="tab" data-f="accepted">Accepted</button>
   <button class="tab" data-f="rejected">Rejected</button>
+  <select id="fileSel" title="filter by file"></select>
   <span id="tagbar" title="filter by tag"></span>
   <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX<kbd>m</kbd></button>
   <button class="tab" id="docBtn" title="show the full document beside the list">⧉&nbsp;Doc<kbd>d</kbd></button>
   <label class="ctxctl" title="context lines shown around each change">
     ±<input id="ctx" type="number" min="0" max="99" step="1"> lines<kbd>+/−</kbd>
+  </label>
+  <label class="ctxctl" title="author name attached to your replies and suggestions (this session only)">
+    user&nbsp;<input id="userIn" type="text">
   </label>
   <button class="tab" id="helpBtn" title="help &amp; shortcuts">?</button>
 </nav>
@@ -300,10 +371,15 @@ window.MathJax = {
 <aside id="docpane">
   <div id="dochdr">
     <span id="docfile"></span>
+    <button id="addBtn" class="dbtn" disabled
+            title="create a suggestion from the selected text">＋ suggest</button>
     <button id="wrapBtn" class="dbtn" title="toggle line wrapping">wrap</button>
     <button id="sideBtn" class="dbtn" title="move pane to the other side">⇄ side</button>
   </div>
-  <pre id="doc"></pre>
+  <div id="docmid">
+    <div id="docbody"><pre id="doc"></pre></div>
+    <div id="ruler"><i id="rthumb"></i></div>
+  </div>
 </aside>
 </div>
 <div id="toast" role="status"></div>
@@ -321,19 +397,41 @@ window.MathJax = {
     <tr><td><kbd>j</kbd>/<kbd>k</kbd></td><td>next / previous suggestion</td></tr>
     <tr><td><kbd>a</kbd> <kbd>r</kbd></td><td>accept / reject, then advance</td></tr>
     <tr><td><kbd>u</kbd></td><td>back to pending</td></tr>
+    <tr><td><kbd>e</kbd></td><td>edit the suggestion (replacement, tags, comment)</td></tr>
     <tr><td><kbd>+</kbd>/<kbd>−</kbd></td><td>more / less context around each change</td></tr>
     <tr><td><kbd>m</kbd></td><td>render TeX in notes &amp; previews (the diff stays verbatim)</td></tr>
     <tr><td><kbd>d</kbd></td><td>document pane — full file with every suggestion highlighted</td></tr>
     <tr><td><kbd>A</kbd></td><td>apply all accepted suggestions</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help (<kbd>Esc</kbd> closes)</td></tr>
   </table>
+  <p>In the document pane, select some text and press
+     <b>＋ suggest</b> to write your own suggestion.</p>
 </dialog>
+
+<dialog id="newsug">
+  <button class="close" title="close">✕</button>
+  <h2 id="nsTitle">New suggestion</h2>
+  <p class="loc" id="nsLoc"></p>
+  <label for="nsOld">anchor text (fixed)</label>
+  <textarea id="nsOld" rows="3" readonly></textarea>
+  <label for="nsNew">replacement</label>
+  <textarea id="nsNew" rows="3"></textarea>
+  <label for="nsTags">tags (comma-separated)</label>
+  <input id="nsTags" type="text" placeholder="clarity, notation, …">
+  <div id="nsTagBar"></div>
+  <label for="nsWhy">comment</label>
+  <textarea id="nsWhy" rows="2" placeholder="why this change?"></textarea>
+  <button id="nsCreate">Create suggestion</button>
+</dialog>
+
+<button id="selAdd" title="create a suggestion from the selection">＋</button>
 
 <script>
 "use strict";
 let STATE = { suggestions: [] };
 let FILTER = "all";
 let TAG = null;           // tag filter (null = all tags)
+let FILE = null;          // file filter (fkey, null = all files)
 let SEL = null;           // selected suggestion id
 let TEXPREV = true;       // render math previews + notes via MathJax
 let CTX = (() => {        // context lines around each change, persisted
@@ -344,13 +442,15 @@ let DOCVIEW = localStorage.getItem("texreview.doc") === "1";
 let DOCLEFT = localStorage.getItem("texreview.docside") === "left";
 let WRAP = localStorage.getItem("texreview.wrap") !== "0";
 let DOC = { fkey: null, text: null, stale: true };  // document pane cache
+let USER = sessionStorage.getItem("texreview.user") || "";  // author override
+let REDIT = null;         // {id, ci} — reply being edited inline
 
 /* typeset only margin notes and previews — never the source diff */
 let mjq = Promise.resolve();
 function typeset() {
   const MJ = window.MathJax;
   if (!MJ || !MJ.typesetPromise || !TEXPREV) return;
-  const els = [...document.querySelectorAll(".note, .prev .tex")];
+  const els = [...document.querySelectorAll(".note, .prev .tex, .reply")];
   if (!els.length) return;
   mjq = mjq.then(() => MJ.typesetPromise(els)).catch(() => {});
 }
@@ -435,17 +535,38 @@ function card(s) {
                   ${s.id === SEL ? "sel" : ""}" data-id="${esc(s.id)}">
     <div class="meta">
       <span class="loc">${loc}</span>${src}${tags}
-      <span class="chip st-${s.status}">${s.status}</span>${problem}
+      <span class="chip st-${s.status}">${s.status}</span>
+      ${s.edited ? `<span class="chip tag" title="edited by you">✎ edited</span>` : ""}${problem}
     </div>
     <div class="diff">${diffHTML(s)}</div>
-    <div class="note" data-id="${esc(s.id)}">${esc(s.reasoning || "(no reasoning given)")}</div>
+    <div class="note" data-id="${esc(s.id)}">${esc(s.reasoning || "(no reasoning given)")}
+      ${s.author || s.date ? `<div class="byline">— ${esc(s.author || "?")}${
+          s.date ? ", " + esc(s.date.slice(0, 10)) : ""}</div>` : ""}
+    </div>
     ${prev}
+    ${(s.replies || []).length || s.id === SEL ? `
+    <div class="thread">
+      ${(s.replies || []).map(r => {
+        const head = `<span class="rwho">${esc(r.author || "?")}</span>` +
+          `<span class="rdate">${esc((r.date || "").slice(0, 16).replace("T", " "))}</span>`;
+        if (REDIT && REDIT.id === s.id && REDIT.ci === r.ci && r.editable)
+          return `<div class="reply">${head}<input class="redit"
+            data-ci="${r.ci}" value="${esc(r.text || "")}"
+            title="Enter saves · empty deletes · Esc cancels"></div>`;
+        return `<div class="reply">${head}${esc(r.text || "")}${r.editable
+          ? `<button class="ract" data-ci="${r.ci}" title="edit reply">✎</button>` : ""}</div>`;
+      }).join("")}
+      ${s.id === SEL ? `<div class="rbox">
+        <input id="replyIn" placeholder="reply… (Enter to send)"></div>` : ""}
+    </div>` : ""}
     <div class="acts">
       <button class="act acc ${s.status === "accepted" ? "on" : ""}"
               data-do="accepted">✓ Accept<kbd>a</kbd></button>
       <button class="act rej ${s.status === "rejected" ? "on" : ""}"
               data-do="rejected">✕ Reject<kbd>r</kbd></button>
       <button class="act" data-do="pending">↩ Undo<kbd>u</kbd></button>
+      ${s.status !== "applied"
+        ? `<button class="act" data-do="edit">✎ Edit<kbd>e</kbd></button>` : ""}
       <span class="keyhint">j/k move</span>
     </div>
   </article>`;
@@ -454,7 +575,32 @@ function card(s) {
 function visible() {
   return STATE.suggestions.filter(s =>
     (FILTER === "all" || s.status === FILTER) &&
-    (TAG === null || (s.tags || []).includes(TAG)));
+    (TAG === null || (s.tags || []).includes(TAG)) &&
+    (FILE === null || s.fkey === FILE));
+}
+
+function filebar() {   // discreet per-file selector (hidden if one file)
+  const sel = $("#fileSel");
+  const files = new Map();               // fkey -> {name, n}
+  STATE.suggestions.forEach(s => {
+    const e = files.get(s.fkey) || { name: s.file, n: 0 };
+    e.n++;
+    files.set(s.fkey, e);
+  });
+  if (FILE !== null && !files.has(FILE)) FILE = null;
+  sel.hidden = files.size < 2;
+  const sig = JSON.stringify([...files]);
+  if (sel._sig !== sig) {
+    sel._sig = sig;
+    sel.innerHTML =
+      `<option value="">all files (${STATE.suggestions.length})</option>` +
+      [...files].sort((a, b) => a[1].name.localeCompare(b[1].name))
+        .map(([k, e]) =>
+          `<option value="${esc(k)}">${esc(e.name)} (${e.n})</option>`)
+        .join("");
+  }
+  sel.value = FILE ?? "";
+  sel.classList.toggle("on", FILE !== null);
 }
 
 function setTag(t) {
@@ -474,6 +620,7 @@ function tagbar() {
 
 function render() {
   tagbar();
+  filebar();
   const list = visible();
   $("#list").innerHTML = list.map(card).join("");
   const empty = $("#empty");
@@ -492,8 +639,11 @@ function render() {
   $(".meter .D").style.width = (100 * c.applied / total) + "%";
   $("#applyBtn").disabled = c.accepted === 0;
   $("#source").textContent = STATE.source || "";
+  $("#userIn").placeholder = STATE.user || "user";
   const sel = document.querySelector(".card.sel");
   if (sel) sel.scrollIntoView({ block: "nearest" });
+  const re = document.querySelector(".redit");
+  if (re) re.focus();
   renderDoc();
   typeset();
 }
@@ -533,6 +683,166 @@ function docHTML(text, subs) {
   return out.split("\n").map(l => `<span class="ln">${l}</span>`).join("");
 }
 
+/* map the current selection to [start, end) offsets in DOC.text.
+   A sentinel is inserted at the selection start to locate it exactly
+   (lines are block spans, so DOM text offsets ≠ file offsets); the
+   result is verified against DOC.text before use. */
+function selInfo() {
+  const doc = $("#doc"), sel = window.getSelection();
+  if (DOC.text === null || !sel || sel.isCollapsed || !sel.rangeCount)
+    return null;
+  const r = sel.getRangeAt(0);
+  if (!doc.contains(r.startContainer) || !doc.contains(r.endContainer))
+    return null;
+  const text = sel.toString();          // block boundaries → "\n"
+  if (!text) return null;
+  const marker = document.createElement("span");
+  const rr = r.cloneRange();
+  rr.collapse(true);
+  rr.insertNode(marker);
+  let a = 0;
+  for (const ln of doc.querySelectorAll(".ln")) {
+    if (ln.contains(marker)) {
+      const w = document.createTreeWalker(ln, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        if (marker.compareDocumentPosition(n) &
+            Node.DOCUMENT_POSITION_FOLLOWING) break;
+        a += n.data.length;
+      }
+      marker.remove();
+      doc.normalize();                  // heal the split text node
+      const old = DOC.text.slice(a, a + text.length);
+      if (old !== text) return null;    // mapping failed — be safe
+      const hits = [];
+      let i = DOC.text.indexOf(old);
+      while (i !== -1) { hits.push(i); i = DOC.text.indexOf(old, i + 1); }
+      const which = hits.indexOf(a);
+      if (which === -1) return null;
+      return { old,
+               occurrence: hits.length > 1 ? which + 1 : null,
+               lineNo: DOC.text.slice(0, a).split("\n").length };
+    }
+    a += ln.textContent.length + 1;     // +1 for the newline
+  }
+  marker.remove();
+  return null;
+}
+
+function nsTags() {
+  return $("#nsTags").value.split(",").map(t => t.trim()).filter(Boolean);
+}
+function nsTagBar() {   // quick-add chips for every tag already in use
+  const cur = new Set(nsTags());
+  const all = new Set();
+  STATE.suggestions.forEach(s => (s.tags || []).forEach(t => all.add(t)));
+  $("#nsTagBar").innerHTML = [...all].sort().map(t =>
+    `<button type="button" class="tagf ${cur.has(t) ? "on" : ""}"
+             data-nstag="${esc(t)}">${esc(t)}</button>`).join("");
+}
+
+function openSugDialog(mode, preset) {
+  const d = $("#newsug");
+  d._mode = mode;                       // "create" | "edit"
+  d._info = preset.info;
+  $("#nsTitle").textContent =
+    mode === "edit" ? `Edit ${preset.info.id}` : "New suggestion";
+  $("#nsCreate").textContent =
+    mode === "edit" ? "Save changes" : "Create suggestion";
+  $("#nsLoc").textContent = preset.loc;
+  $("#nsOld").value = preset.old;
+  $("#nsNew").value = preset.new;
+  $("#nsTags").value = (preset.tags || []).join(", ");
+  $("#nsWhy").value = preset.reasoning || "";
+  nsTagBar();
+  d.showModal();
+  $("#nsNew").focus();
+  $("#nsNew").select();
+}
+
+function openNewSug() {
+  const info = selInfo();
+  const s = STATE.suggestions.find(x => x.id === SEL);
+  if (!info || !s) { toast("select some text in the document first"); return; }
+  $("#selAdd").style.display = "none";
+  openSugDialog("create", {
+    info: { file: s.file, old: info.old, occurrence: info.occurrence },
+    loc: `${s.file}:${info.lineNo}` +
+         (info.occurrence ? `  (occurrence ${info.occurrence})` : ""),
+    old: info.old, new: info.old, tags: [], reasoning: "",
+  });
+}
+
+function openEditSug(id) {
+  const s = STATE.suggestions.find(x => x.id === id);
+  if (!s || s.status === "applied") return;
+  openSugDialog("edit", {
+    info: { id: s.id },
+    loc: `${s.file}${s.match.line ? ":" + s.match.line : ""}  (${s.source})`,
+    old: s.old, new: s.new, tags: s.tags, reasoning: s.reasoning,
+  });
+}
+
+async function submitSug() {
+  const d = $("#newsug");
+  const edit = d._mode === "edit";
+  const body = {
+    ...d._info,
+    new: $("#nsNew").value,
+    reasoning: $("#nsWhy").value.trim(),
+    tags: nsTags(),
+    author: USER || undefined,
+  };
+  const r = await fetch(edit ? "/api/edit" : "/api/suggest",
+                        { method: "POST", body: JSON.stringify(body) });
+  const rep = await r.json();
+  if (!r.ok) { toast(`could not ${d._mode}: ${rep.error}`); return; }
+  d.close();
+  if (!edit) {
+    SEL = rep.id;
+    toast(rep.existing ? `identical suggestion exists: ${rep.id}`
+                       : `created ${rep.id}`);
+  }
+  await refresh();
+}
+
+/* ---- overview ruler ---- */
+function rulerThumb() {
+  const body = $("#docbody"), t = $("#rthumb"), ruler = $("#ruler");
+  const H = body.scrollHeight || 1, RH = ruler.clientHeight;
+  t.style.top = (body.scrollTop / H * RH) + "px";
+  t.style.height = Math.max(10, body.clientHeight / H * RH) + "px";
+}
+
+function renderRuler() {
+  const ruler = $("#ruler"), body = $("#docbody"), doc = $("#doc");
+  ruler.querySelectorAll(".rm").forEach(x => x.remove());
+  rulerThumb();
+  if (!DOCVIEW || DOC.text === null) return;
+  const bodyTop = body.getBoundingClientRect().top - body.scrollTop;
+  const H = body.scrollHeight || 1, RH = ruler.clientHeight;
+  const spans = new Map();               // id -> extent over all mark parts
+  for (const m of doc.querySelectorAll("mark[data-id]")) {
+    const r = m.getBoundingClientRect();
+    const top = r.top - bodyTop, bot = r.bottom - bodyTop;
+    const e = spans.get(m.dataset.id);
+    if (e) { e.top = Math.min(e.top, top); e.bot = Math.max(e.bot, bot); }
+    else spans.set(m.dataset.id, {
+      top, bot,
+      status: (m.className.match(/st-[a-z]+/) || [""])[0],
+      sel: m.classList.contains("sel"),
+    });
+  }
+  for (const [id, e] of spans) {
+    const el = document.createElement("i");
+    el.className = `rm ${e.status}${e.sel ? " sel" : ""}`;
+    el.dataset.id = id;
+    el.title = id;
+    el.style.top = (e.top / H * RH) + "px";
+    el.style.height = Math.max(3, (e.bot - e.top) / H * RH) + "px";
+    ruler.appendChild(el);
+  }
+}
+
 let docReq = 0;
 async function renderDoc() {
   if (!DOCVIEW) return;
@@ -563,6 +873,7 @@ async function renderDoc() {
   $("#doc").innerHTML = docHTML(DOC.text, subs);
   const m = document.querySelector("#doc mark.sel");
   if (m) m.scrollIntoView({ block: "center" });
+  renderRuler();
 }
 
 function setCtx(n) {
@@ -614,8 +925,20 @@ document.addEventListener("click", e => {
   if (e.target.closest("#texBtn")) { toggleTex(); return; }
   if (e.target.closest("#docBtn")) { toggleDoc(); return; }
   if (e.target.closest("#helpBtn")) { $("#help").showModal(); return; }
-  if (e.target.closest("#help .close")) { $("#help").close(); return; }
-  if (e.target === $("#help")) { $("#help").close(); return; }  // backdrop
+  if (e.target.closest("#addBtn")) { openNewSug(); return; }
+  if (e.target.closest("#nsCreate")) { submitSug(); return; }
+  const nstag = e.target.closest("[data-nstag]");
+  if (nstag) {                          // toggle an existing tag
+    const t = nstag.dataset.nstag, cur = nsTags();
+    $("#nsTags").value = (cur.includes(t)
+      ? cur.filter(x => x !== t) : [...cur, t]).join(", ");
+    nsTagBar();
+    return;
+  }
+  const dlg = e.target.closest("dialog");
+  if (dlg && (e.target.closest(".close") || e.target === dlg)) {
+    dlg.close(); return;                // ✕ or backdrop click
+  }
   const mk = e.target.closest("#doc mark[data-id]");
   if (mk) { SEL = mk.dataset.id; render(); return; }
   const tagEl = e.target.closest("[data-tag]");
@@ -627,10 +950,20 @@ document.addEventListener("click", e => {
       t.classList.toggle("on", t === tab));
     render(); return;
   }
+  if (e.target.closest(".rbox, .redit")) return;  // typing — don't rerender
   const cardEl = e.target.closest(".card");
   if (cardEl) { SEL = cardEl.dataset.id; }
+  const ract = e.target.closest(".ract");
+  if (ract && cardEl) {
+    REDIT = { id: cardEl.dataset.id, ci: +ract.dataset.ci };
+    render();
+    return;
+  }
   const act = e.target.closest(".act");
-  if (act && cardEl) decide(cardEl.dataset.id, act.dataset.do);
+  if (act && cardEl) {
+    if (act.dataset.do === "edit") openEditSug(cardEl.dataset.id);
+    else decide(cardEl.dataset.id, act.dataset.do);
+  }
   else if (cardEl) render();
 });
 $("#applyBtn").addEventListener("click", applyAll);
@@ -652,15 +985,17 @@ function decideAndAdvance(status) {
   if (next) SEL = next.id;
 }
 document.addEventListener("keydown", e => {
-  if (e.target.matches("input, textarea") || e.metaKey || e.ctrlKey) return;
+  if (e.target.matches("input, textarea, select") || e.metaKey || e.ctrlKey)
+    return;
   const k = e.key;
-  if ($("#help").open) return;                 // Esc closes natively
+  if ($("#help").open || $("#newsug").open) return;  // Esc closes natively
   if (k === "?") { $("#help").showModal(); return; }
   if (k === "j" || k === "ArrowDown") { move(1); e.preventDefault(); }
   else if (k === "k" || k === "ArrowUp") { move(-1); e.preventDefault(); }
   else if (k === "a") decideAndAdvance("accepted");
   else if (k === "r") decideAndAdvance("rejected");
   else if (k === "u") decide(SEL, "pending");
+  else if (k === "e") openEditSug(SEL);
   else if (k === "m") toggleTex();
   else if (k === "d") toggleDoc();
   else if (k === "+" || k === "=") setCtx(CTX + 1);
@@ -670,6 +1005,39 @@ document.addEventListener("keydown", e => {
 
 $("#ctx").value = CTX;
 $("#ctx").addEventListener("change", e => setCtx(+e.target.value));
+$("#userIn").value = USER;
+$("#userIn").addEventListener("change", e => {
+  USER = e.target.value.trim();
+  sessionStorage.setItem("texreview.user", USER);
+});
+$("#fileSel").addEventListener("change", e => {
+  FILE = e.target.value || null;
+  // follow into the chosen file (also drives the document pane)
+  const list = visible();
+  if (list.length && !list.some(s => s.id === SEL))
+    SEL = (list.find(s => s.status === "pending") || list[0]).id;
+  render();
+});
+
+document.addEventListener("keydown", e => {
+  if (e.target.id === "replyIn" && e.key === "Enter" &&
+      e.target.value.trim()) {
+    fetch("/api/reply", { method: "POST", body: JSON.stringify(
+      { id: SEL, text: e.target.value, author: USER || undefined },
+    ) }).then(refresh);
+  }
+  if (e.target.classList?.contains("redit")) {
+    if (e.key === "Enter") {
+      const body = { id: REDIT.id, ci: REDIT.ci, text: e.target.value };
+      REDIT = null;
+      fetch("/api/reply_edit",
+            { method: "POST", body: JSON.stringify(body) }).then(refresh);
+    } else if (e.key === "Escape") {
+      REDIT = null;
+      render();
+    }
+  }
+});
 
 /* keep the sticky toolbar flush under the (variable-height) header,
    and the doc pane flush under both */
@@ -685,10 +1053,49 @@ $("#ctx").addEventListener("change", e => setCtx(+e.target.value));
   new ResizeObserver(sync).observe(nv);
   sync();
 }
+function placeSelAdd() {
+  const b = $("#selAdd"), sel = window.getSelection(), doc = $("#doc");
+  const ok = sel && !sel.isCollapsed && sel.rangeCount && sel.anchorNode &&
+             doc.contains(sel.anchorNode) && doc.contains(sel.focusNode);
+  $("#addBtn").disabled = !ok;
+  if (!ok) { b.style.display = "none"; return; }
+  const r = sel.getRangeAt(0).getBoundingClientRect();
+  b.style.display = "block";
+  // above the selection (Firefox parks its own AI button lower-right)
+  b.style.left = Math.max(4, Math.min(innerWidth - 32, r.right - 10)) + "px";
+  b.style.top = Math.max(4, Math.min(innerHeight - 32, r.top - 32)) + "px";
+}
+document.addEventListener("selectionchange", placeSelAdd);
+addEventListener("resize", () => { placeSelAdd(); renderRuler(); });
+$("#docbody").addEventListener("scroll", () => {
+  placeSelAdd();
+  rulerThumb();
+});
+{
+  const ruler = $("#ruler"), body = $("#docbody");
+  let drag = false;
+  const seek = e => {
+    const r = ruler.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    body.scrollTop = f * body.scrollHeight - body.clientHeight / 2;
+  };
+  ruler.addEventListener("mousedown", e => {
+    const rm = e.target.closest(".rm");
+    if (rm) { SEL = rm.dataset.id; render(); return; }
+    drag = true;
+    seek(e);
+    e.preventDefault();
+  });
+  addEventListener("mousemove", e => drag && seek(e));
+  addEventListener("mouseup", () => drag = false);
+}
+$("#selAdd").addEventListener("mousedown", e => e.preventDefault());
+$("#selAdd").addEventListener("click", openNewSug);
 $("#wrapBtn").addEventListener("click", () => {
   WRAP = !WRAP;
   localStorage.setItem("texreview.wrap", WRAP ? "1" : "0");
   applyDocPrefs();
+  renderRuler();          // wrap changes line geometry
 });
 $("#sideBtn").addEventListener("click", () => {
   DOCLEFT = !DOCLEFT;
