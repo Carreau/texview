@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/carreau/texview/schema.json",
+  "title": "tex-review pass file",
+  "description": "One agent pass: a set of suggested edits to a manuscript, anchored on exact text. Either an object with a `suggestions` array, or a bare array of suggestions.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "base_dir": {
+          "type": "string",
+          "description": "Directory that suggestion `file` paths are relative to, itself relative to this pass file. Defaults to '..' (the pass file lives in <manuscript>/review/).",
+          "default": ".."
+        },
+        "suggestions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/suggestion" }
+        }
+      },
+      "required": ["suggestions"],
+      "additionalProperties": true
+    },
+    {
+      "type": "array",
+      "items": { "$ref": "#/definitions/suggestion" }
+    }
+  ],
+  "definitions": {
+    "suggestion": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path of the file to edit, relative to base_dir."
+        },
+        "old": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact text to replace, copied verbatim from the file (whitespace included). Must be unique in the file unless `occurrence` is set."
+        },
+        "new": {
+          "type": "string",
+          "description": "Replacement text; empty string deletes the anchored text."
+        },
+        "occurrence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based index selecting which occurrence of `old` to replace when it appears more than once."
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "One-sentence explanation shown to the reviewer; may contain TeX math."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Short labels such as grammar, clarity, typo, notation."
+        },
+        "id": {
+          "type": "string",
+          "description": "Short id unique within the pass file, e.g. s001."
+        }
+      },
+      "required": ["file", "old", "new"],
+      "additionalProperties": true
+    }
+  }
+}

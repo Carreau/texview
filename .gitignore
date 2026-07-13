@@ -1,0 +1,5 @@
+__pycache__/
+dist/
+*.bak
+.DS_Store
+texput.log

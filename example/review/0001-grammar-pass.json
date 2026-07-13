@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "base_dir": "..",
+  "suggestions": [
+    {
+      "id": "s001",
+      "file": "paper.tex",
+      "old": "we shows that",
+      "new": "we show that",
+      "reasoning": "Subject-verb agreement: plural subject 'we' takes 'show'.",
+      "tags": [
+        "grammar"
+      ]
+    },
+    {
+      "id": "s002",
+      "file": "paper.tex",
+      "old": "the the convergence",
+      "new": "the convergence",
+      "reasoning": "Duplicated article.",
+      "tags": [
+        "typo"
+      ]
+    },
+    {
+      "id": "s003",
+      "file": "paper.tex",
+      "old": "rate of of the",
+      "new": "rate of the",
+      "reasoning": "Duplicated preposition, same line as s002 but independent.",
+      "tags": [
+        "typo"
+      ]
+    },
+    {
+      "id": "s004",
+      "file": "paper.tex",
+      "old": "it's implications",
+      "new": "its implications",
+      "reasoning": "Possessive 'its', not the contraction 'it's'.",
+      "tags": [
+        "grammar"
+      ]
+    }
+  ]
+}

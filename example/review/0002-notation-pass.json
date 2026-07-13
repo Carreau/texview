@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "base_dir": "..",
+  "suggestions": [
+    {
+      "id": "n001",
+      "file": "paper.tex",
+      "old": "$x \\in R^d$",
+      "new": "$x \\in \\mathbb{R}^d$",
+      "reasoning": "Use $\\mathbb{R}$ for the reals: $x \\in \\mathbb{R}^d$ is consistent with the definition $f\\colon \\mathbb{R}^d \\to \\mathbb{R}$ in Section 2.",
+      "tags": [
+        "notation"
+      ]
+    },
+    {
+      "id": "n002",
+      "file": "paper.tex",
+      "old": "experiments demonstrates that the method scale well",
+      "new": "experiments demonstrate that the method scales well",
+      "reasoning": "Two agreement errors in one clause; fixed together since they overlap.",
+      "tags": [
+        "grammar"
+      ]
+    },
+    {
+      "id": "n003",
+      "file": "paper.tex",
+      "old": "the the convergence",
+      "new": "the convergence",
+      "reasoning": "Duplicated article (re-emitted; deduped by content hash).",
+      "tags": [
+        "typo"
+      ]
+    }
+  ]
+}

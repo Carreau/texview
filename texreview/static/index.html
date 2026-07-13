@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tex-review</title>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [["$", "$"], ["\\(", "\\)"]],
+    displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+    processEscapes: true,
+  },
+  svg: { scale: 0.94 },
+  startup: {
+    typeset: false,   // we typeset only notes + previews, never the diff
+    ready() {
+      MathJax.startup.defaultReady();
+      MathJax.startup.promise.then(() => window.typeset && typeset());
+    },
+  },
+};
+</script>
+<!-- local copy first (offline); falls back to CDN if absent -->
+<script defer src="/mathjax/es5/tex-svg.js"
+  onerror="var s=document.createElement('script');s.defer=true;
+           s.src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
+           document.head.appendChild(s);"></script>
+<style>
+  :root {
+    --desk:   #e9e7e1;
+    --paper:  #fdfcf9;
+    --ink:    #1f2328;
+    --faint:  #6b7280;
+    --rule:   #d8d4ca;
+    --pencil: #2d4f8f;   /* editor's blue pencil */
+    --ok:     #1f7a3d;  --ok-bg:  #e7f3eb;
+    --no:     #b3261e;  --no-bg:  #fbeae9;
+    --warn:   #9a6700;  --warn-bg:#fff4d6;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --serif: Charter, "Bitstream Charter", Georgia, "Times New Roman", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--desk); color: var(--ink);
+    font: 14px/1.5 var(--sans);
+  }
+
+  /* ---- header ---- */
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--ink); color: #e8e6e1;
+    padding: 10px 20px; display: flex; align-items: center; gap: 16px;
+  }
+  header h1 {
+    font: 600 15px var(--mono); margin: 0; letter-spacing: .02em;
+  }
+  header h1 span { color: #8aa4d6; }
+  #source { font: 12px var(--mono); color: #9aa0a6;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            flex: 1; min-width: 0; }
+  .meter { display: flex; height: 8px; width: 180px; border-radius: 4px;
+           overflow: hidden; background: #3a3f45; flex: none; }
+  .meter i { display: block; height: 100%; }
+  .meter .A { background: var(--ok); }
+  .meter .R { background: var(--no); }
+  .meter .D { background: #8aa4d6; }
+  #counts { font: 12px var(--mono); color: #cfd3d8; flex: none; }
+  #applyBtn {
+    flex: none; background: var(--pencil); color: #fff; border: 0;
+    border-radius: 6px; padding: 7px 14px; font: 600 13px var(--sans);
+    cursor: pointer;
+  }
+  #applyBtn:disabled { opacity: .45; cursor: default; }
+  #applyBtn:focus-visible, .tab:focus-visible, .act:focus-visible {
+    outline: 2px solid #8aa4d6; outline-offset: 2px;
+  }
+
+  /* ---- toolbar (sticks just below the header) ---- */
+  nav { position: sticky; top: var(--hdr, 48px); z-index: 4;
+        background: var(--desk);
+        max-width: 1060px; margin: 0 auto; padding: 16px 20px 8px;
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  #tagbar { display: inline-flex; flex-wrap: wrap; gap: 6px;
+            align-items: center; }
+  .tagf { font: 11px/1 var(--sans); padding: 4px 9px; border-radius: 999px;
+          border: 1px solid var(--rule); background: var(--paper);
+          color: #44506b; cursor: pointer; }
+  .tagf.on { background: #44506b; border-color: #44506b; color: #fff; }
+  .tagf .n { opacity: .6; margin-left: 3px; }
+  .tab { background: none; border: 0; border-bottom: 2px solid transparent;
+         padding: 4px 2px; margin-right: 10px; font: 500 13px var(--sans);
+         color: var(--faint); cursor: pointer; }
+  .tab.on { color: var(--ink); border-bottom-color: var(--pencil); }
+  nav .keys { margin-left: auto; font: 12px var(--mono); color: var(--faint); }
+  nav .keys b { font-weight: 600; color: var(--ink); background: var(--paper);
+                border: 1px solid var(--rule); border-bottom-width: 2px;
+                border-radius: 4px; padding: 0 5px; }
+
+  /* ---- cards ---- */
+  main { max-width: 1060px; margin: 0 auto 90px; padding: 0 20px; }
+  .card {
+    background: var(--paper); border: 1px solid var(--rule);
+    border-left: 3px solid transparent; border-radius: 6px;
+    margin: 12px 0; padding: 14px 18px;
+    display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    gap: 6px 22px; cursor: pointer;
+  }
+  /* keep j/k-selected cards clear of the sticky header + toolbar */
+  .card { scroll-margin-top: calc(var(--hdr, 48px) + 52px); }
+  .card.sel { border-left-color: var(--pencil);
+              box-shadow: 0 2px 10px rgba(31,35,40,.10); }
+  .card.applied { opacity: .55; }
+  .meta { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center;
+          flex-wrap: wrap; }
+  .loc { font: 12px var(--mono); color: var(--faint); }
+  .chip { font: 11px/1 var(--sans); padding: 3px 8px; border-radius: 999px; }
+  .chip.tag { background: #eef1f6; color: #44506b; }
+  .chip.st-accepted { background: var(--ok-bg); color: var(--ok); }
+  .chip.st-rejected { background: var(--no-bg); color: var(--no); }
+  .chip.st-applied  { background: #e3e6ea; color: #444; }
+  .chip.st-pending  { background: #f1efe9; color: var(--faint); }
+  .chip.problem     { background: var(--warn-bg); color: var(--warn); }
+
+  .diff {
+    font: 13px/1.65 var(--mono); white-space: pre-wrap;
+    word-break: break-word; padding: 8px 10px;
+    background: #f7f5f0; border-radius: 4px; min-width: 0;
+  }
+  .diff .dim { color: #a39f94; }
+  .diff del { background: var(--no-bg); color: var(--no);
+              text-decoration: line-through; text-decoration-thickness: 1px;
+              border-radius: 2px; }
+  .diff ins { background: var(--ok-bg); color: var(--ok);
+              text-decoration: none; border-radius: 2px; }
+
+  /* margin note — the referee's comment */
+  .note {
+    font: italic 14px/1.55 var(--serif); color: #3d4147;
+    border-left: 1px dotted #b9b3a4; padding-left: 16px; min-width: 0;
+  }
+  .note::before { content: attr(data-id) " — "; font: 11px var(--mono);
+                  font-style: normal; color: var(--pencil); }
+
+  /* rendered before/after (MathJax) */
+  .prev { grid-column: 1; display: grid; gap: 4px; padding: 7px 10px;
+          border: 1px solid var(--rule); border-radius: 4px;
+          background: #fff; min-width: 0; }
+  .prev > div { display: flex; gap: 10px; align-items: baseline; }
+  .prev .pl { font: 10px var(--mono); color: var(--faint); flex: none;
+              width: 46px; text-transform: uppercase;
+              letter-spacing: .08em; }
+  .prev .tex { font: 14px/1.6 var(--serif); min-width: 0;
+               overflow-x: auto; }
+  #texBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
+
+  .ctxctl { display: inline-flex; align-items: center; gap: 4px;
+            font: 12px var(--mono); color: var(--faint); }
+  .ctxctl input { width: 3.2em; font: 12px var(--mono); color: var(--ink);
+                  background: var(--paper); border: 1px solid var(--rule);
+                  border-radius: 4px; padding: 2px 4px; text-align: center; }
+
+  .acts { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 4px; }
+  .act { border: 1px solid var(--rule); background: var(--paper);
+         border-radius: 6px; padding: 5px 12px; font: 500 12px var(--sans);
+         cursor: pointer; color: var(--ink); }
+  .act.acc.on { background: var(--ok-bg); border-color: var(--ok);
+                color: var(--ok); }
+  .act.rej.on { background: var(--no-bg); border-color: var(--no);
+                color: var(--no); }
+
+  #toast { position: fixed; left: 50%; bottom: 24px;
+           transform: translateX(-50%);
+           background: var(--ink); color: #fff; padding: 10px 18px;
+           border-radius: 8px; font: 13px var(--mono); display: none;
+           max-width: 90vw; }
+  #empty { text-align: center; color: var(--faint); padding: 60px 0;
+           font: italic 15px var(--serif); }
+
+  @media (max-width: 760px) {
+    .card { grid-template-columns: 1fr; }
+    .note { border-left: 0; border-top: 1px dotted #b9b3a4;
+            padding: 10px 0 0; }
+    nav .keys { display: none; }
+    .meter { display: none; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .card { transition: border-color .12s, box-shadow .12s, opacity .2s; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>tex<span>·</span>review</h1>
+  <div id="source"></div>
+  <div class="meter" aria-hidden="true">
+    <i class="A"></i><i class="R"></i><i class="D"></i>
+  </div>
+  <div id="counts"></div>
+  <button id="applyBtn">Apply accepted</button>
+</header>
+
+<nav>
+  <button class="tab on" data-f="all">All</button>
+  <button class="tab" data-f="pending">Pending</button>
+  <button class="tab" data-f="accepted">Accepted</button>
+  <button class="tab" data-f="rejected">Rejected</button>
+  <span id="tagbar" title="filter by tag"></span>
+  <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX</button>
+  <label class="ctxctl" title="context lines shown around each change">
+    ±<input id="ctx" type="number" min="0" max="99" step="1"> lines
+  </label>
+  <span class="keys">
+    <b>j</b>/<b>k</b> move · <b>a</b> accept · <b>r</b> reject ·
+    <b>u</b> undo · <b>m</b> math · <b>+</b>/<b>−</b> context ·
+    <b>A</b> apply
+  </span>
+</nav>
+
+<main><div id="list"></div><div id="empty" hidden></div></main>
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+let STATE = { suggestions: [] };
+let FILTER = "all";
+let TAG = null;           // tag filter (null = all tags)
+let SEL = null;           // selected suggestion id
+let TEXPREV = true;       // render math previews + notes via MathJax
+let CTX = (() => {        // context lines around each change, persisted
+  const n = parseInt(localStorage.getItem("texreview.ctx") ?? "1", 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(99, n)) : 1;
+})();
+
+/* typeset only margin notes and previews — never the source diff */
+let mjq = Promise.resolve();
+function typeset() {
+  const MJ = window.MathJax;
+  if (!MJ || !MJ.typesetPromise || !TEXPREV) return;
+  const els = [...document.querySelectorAll(".note, .prev .tex")];
+  if (!els.length) return;
+  mjq = mjq.then(() => MJ.typesetPromise(els)).catch(() => {});
+}
+window.typeset = typeset;
+function toggleTex() {
+  TEXPREV = !TEXPREV;
+  document.querySelector("#texBtn").classList.toggle("on", TEXPREV);
+  render();
+}
+
+const $ = s => document.querySelector(s);
+const esc = t => t.replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---- word-level diff (LCS on whitespace-preserving tokens) ---- */
+function tokens(s) { return s.split(/(\s+)/).filter(x => x !== ""); }
+function wordDiff(a, b) {
+  const A = tokens(a), B = tokens(b);
+  if (A.length * B.length > 250000)          // huge edit: plain blocks
+    return `<del>${esc(a)}</del><ins>${esc(b)}</ins>`;
+  const n = A.length, m = B.length;
+  const L = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      L[i][j] = A[i] === B[j] ? L[i+1][j+1] + 1
+                              : Math.max(L[i+1][j], L[i][j+1]);
+  let i = 0, j = 0, out = "", del = "", ins = "";
+  const flush = () => {
+    if (del) out += `<del>${esc(del)}</del>`;
+    if (ins) out += `<ins>${esc(ins)}</ins>`;
+    del = ins = "";
+  };
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { flush(); out += esc(A[i]); i++; j++; }
+    else if (L[i+1][j] >= L[i][j+1]) del += A[i++];
+    else ins += B[j++];
+  }
+  while (i < n) del += A[i++];
+  while (j < m) ins += B[j++];
+  flush();
+  return out;
+}
+
+/* ---- rendering ---- */
+function diffHTML(s) {
+  const m = s.match;
+  const body = wordDiff(s.old || "", s.new || "");
+  if (m.state === "ok" && m.context) {
+    const pre = m.context.slice(0, m.ctx_start);
+    const post = m.context.slice(m.ctx_start + (s.old || "").length);
+    return `<span class="dim">${esc(pre)}</span>${body}` +
+           `<span class="dim">${esc(post)}</span>`;
+  }
+  return body;
+}
+
+const PROBLEMS = {
+  missing: "text not found in file",
+  ambiguous: "matches several places — set `occurrence`",
+  overlap: "overlaps another accepted change",
+  "bad-file": "file unreadable",
+};
+
+function card(s) {
+  const m = s.match;
+  const problem = PROBLEMS[m.state] && s.status !== "applied"
+    ? `<span class="chip problem">⚠ ${PROBLEMS[m.state]}</span>` : "";
+  const tags = (s.tags || []).map(t =>
+    `<span class="chip tag" data-tag="${esc(t)}"
+           title="filter by this tag">${esc(t)}</span>`).join("");
+  const loc = m.line ? `${esc(s.file)}:${m.line}` : esc(s.file);
+  const src = s.source && !s.source.startsWith("suggestions")
+    ? `<span class="chip tag" title="agent pass">${esc(s.source)}</span>` : "";
+  const hasMath = /[$]|\\\(|\\\[/.test((s.old || "") + (s.new || ""));
+  const prev = TEXPREV && hasMath ? `
+    <div class="prev">
+      <div><span class="pl">before</span><span class="tex">${esc(s.old || "")}</span></div>
+      <div><span class="pl">after</span><span class="tex">${esc(s.new || "")}</span></div>
+    </div>` : "";
+  return `
+  <article class="card ${s.status === "applied" ? "applied" : ""}
+                  ${s.id === SEL ? "sel" : ""}" data-id="${esc(s.id)}">
+    <div class="meta">
+      <span class="loc">${loc}</span>${src}${tags}
+      <span class="chip st-${s.status}">${s.status}</span>${problem}
+    </div>
+    <div class="diff">${diffHTML(s)}</div>
+    <div class="note" data-id="${esc(s.id)}">${esc(s.reasoning || "(no reasoning given)")}</div>
+    ${prev}
+    <div class="acts">
+      <button class="act acc ${s.status === "accepted" ? "on" : ""}"
+              data-do="accepted">✓ Accept</button>
+      <button class="act rej ${s.status === "rejected" ? "on" : ""}"
+              data-do="rejected">✕ Reject</button>
+      <button class="act" data-do="pending">↩ Undo</button>
+    </div>
+  </article>`;
+}
+
+function visible() {
+  return STATE.suggestions.filter(s =>
+    (FILTER === "all" || s.status === FILTER) &&
+    (TAG === null || (s.tags || []).includes(TAG)));
+}
+
+function setTag(t) {
+  TAG = t === TAG ? null : t;   // clicking the active tag clears it
+  render();
+}
+
+function tagbar() {
+  const counts = new Map();
+  STATE.suggestions.forEach(s =>
+    (s.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
+  if (TAG !== null && !counts.has(TAG)) TAG = null;
+  $("#tagbar").innerHTML = [...counts.keys()].sort().map(t =>
+    `<button class="tagf ${t === TAG ? "on" : ""}" data-tag="${esc(t)}">
+       ${esc(t)}<span class="n">${counts.get(t)}</span></button>`).join("");
+}
+
+function render() {
+  tagbar();
+  const list = visible();
+  $("#list").innerHTML = list.map(card).join("");
+  const empty = $("#empty");
+  empty.hidden = list.length > 0;
+  empty.textContent = STATE.suggestions.length === 0
+    ? "No suggestions loaded — point the agent at suggestions.json."
+    : "Nothing in this filter. Every manuscript deserves a clean desk.";
+  const c = { pending: 0, accepted: 0, rejected: 0, applied: 0 };
+  STATE.suggestions.forEach(s => c[s.status]++);
+  const total = STATE.suggestions.length || 1;
+  $("#counts").textContent =
+    `${c.pending} pending · ${c.accepted} ✓ · ${c.rejected} ✕` +
+    (c.applied ? ` · ${c.applied} applied` : "");
+  $(".meter .A").style.width = (100 * c.accepted / total) + "%";
+  $(".meter .R").style.width = (100 * c.rejected / total) + "%";
+  $(".meter .D").style.width = (100 * c.applied / total) + "%";
+  $("#applyBtn").disabled = c.accepted === 0;
+  $("#source").textContent = STATE.source || "";
+  const sel = document.querySelector(".card.sel");
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+  typeset();
+}
+
+function setCtx(n) {
+  n = Math.max(0, Math.min(99, n | 0));
+  if (n === CTX) { $("#ctx").value = CTX; return; }
+  CTX = n;
+  localStorage.setItem("texreview.ctx", CTX);
+  $("#ctx").value = CTX;
+  refresh();
+}
+
+/* ---- api ---- */
+async function refresh() {
+  STATE = await (await fetch(`/api/state?ctx=${CTX}`)).json();
+  if (SEL === null && STATE.suggestions.length)
+    SEL = (STATE.suggestions.find(s => s.status === "pending")
+           || STATE.suggestions[0]).id;
+  render();
+}
+async function decide(id, status) {
+  const s = STATE.suggestions.find(x => x.id === id);
+  if (!s || s.status === "applied") return;
+  s.status = status;                      // optimistic
+  render();
+  await fetch("/api/decide", { method: "POST",
+    body: JSON.stringify({ id, status }) });
+  refresh();
+}
+async function applyAll() {
+  const n = STATE.suggestions.filter(s => s.status === "accepted").length;
+  if (!n || !confirm(`Apply ${n} accepted change(s) to the files? ` +
+                     `A .bak copy is kept next to each file.`)) return;
+  const rep = await (await fetch("/api/apply", { method: "POST" })).json();
+  toast(`applied ${rep.applied.length}` +
+        (rep.skipped.length ? ` · skipped ${rep.skipped.length} ` +
+          `(${rep.skipped.map(s => s.id + ": " + s.reason).join(", ")})` : ""));
+  refresh();
+}
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = "none", 6000);
+}
+
+/* ---- interaction ---- */
+document.addEventListener("click", e => {
+  if (e.target.closest("#texBtn")) { toggleTex(); return; }
+  const tagEl = e.target.closest("[data-tag]");
+  if (tagEl) { setTag(tagEl.dataset.tag); return; }
+  const tab = e.target.closest(".tab");
+  if (tab) {
+    FILTER = tab.dataset.f;
+    document.querySelectorAll(".tab").forEach(t =>
+      t.classList.toggle("on", t === tab));
+    render(); return;
+  }
+  const cardEl = e.target.closest(".card");
+  if (cardEl) { SEL = cardEl.dataset.id; }
+  const act = e.target.closest(".act");
+  if (act && cardEl) decide(cardEl.dataset.id, act.dataset.do);
+  else if (cardEl) render();
+});
+$("#applyBtn").addEventListener("click", applyAll);
+
+function move(delta) {
+  const list = visible();
+  if (!list.length) return;
+  let i = list.findIndex(s => s.id === SEL);
+  i = i === -1 ? 0 : Math.min(list.length - 1, Math.max(0, i + delta));
+  SEL = list[i].id;
+  render();
+}
+function decideAndAdvance(status) {
+  if (!SEL) return;
+  decide(SEL, status);
+  const list = visible();
+  const i = list.findIndex(s => s.id === SEL);
+  const next = list.slice(i + 1).find(s => s.status === "pending");
+  if (next) SEL = next.id;
+}
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input, textarea") || e.metaKey || e.ctrlKey) return;
+  const k = e.key;
+  if (k === "j" || k === "ArrowDown") { move(1); e.preventDefault(); }
+  else if (k === "k" || k === "ArrowUp") { move(-1); e.preventDefault(); }
+  else if (k === "a") decideAndAdvance("accepted");
+  else if (k === "r") decideAndAdvance("rejected");
+  else if (k === "u") decide(SEL, "pending");
+  else if (k === "m") toggleTex();
+  else if (k === "+" || k === "=") setCtx(CTX + 1);
+  else if (k === "-") setCtx(CTX - 1);
+  else if (k === "A") applyAll();
+});
+
+$("#ctx").value = CTX;
+$("#ctx").addEventListener("change", e => setCtx(+e.target.value));
+
+/* keep the sticky toolbar flush under the (variable-height) header */
+{
+  const hdr = document.querySelector("header");
+  const sync = () => document.documentElement.style.setProperty(
+    "--hdr", hdr.offsetHeight + "px");
+  new ResizeObserver(sync).observe(hdr);
+  sync();
+}
+
+refresh();
+</script>
+</body>
+</html>
