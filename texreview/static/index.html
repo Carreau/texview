@@ -349,6 +349,13 @@ window.MathJax = {
 </header>
 
 <nav>
+  <span id="localbar" hidden>
+    <button class="tab" id="openBtn"
+            title="load .tex files and review .json passes">📂&nbsp;Open</button>
+    <button class="tab" id="dlBtn"
+            title="download edited files, decisions and comments">⬇&nbsp;Save</button>
+    <input id="fileIn" type="file" multiple hidden>
+  </span>
   <button class="tab on" data-f="all">All</button>
   <button class="tab" data-f="pending">Pending</button>
   <button class="tab" data-f="accepted">Accepted</button>
@@ -363,6 +370,8 @@ window.MathJax = {
   <label class="ctxctl" title="author name attached to your replies and suggestions (this session only)">
     user&nbsp;<input id="userIn" type="text">
   </label>
+  <button class="tab" id="purgeBtn"
+          title="remove applied/rejected suggestions from the review files (rewrites pass files)">🧹&nbsp;Purge</button>
   <button class="tab" id="helpBtn" title="help &amp; shortcuts">?</button>
 </nav>
 
@@ -401,7 +410,7 @@ window.MathJax = {
     <tr><td><kbd>+</kbd>/<kbd>−</kbd></td><td>more / less context around each change</td></tr>
     <tr><td><kbd>m</kbd></td><td>render TeX in notes &amp; previews (the diff stays verbatim)</td></tr>
     <tr><td><kbd>d</kbd></td><td>document pane — full file with every suggestion highlighted</td></tr>
-    <tr><td><kbd>A</kbd></td><td>apply all accepted suggestions</td></tr>
+    <tr><td><kbd>A</kbd></td><td>apply all accepted suggestions (applied cards get ↶ Revert)</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help (<kbd>Esc</kbd> closes)</td></tr>
   </table>
   <p>In the document pane, select some text and press
@@ -462,6 +471,27 @@ function toggleTex() {
 }
 
 const $ = s => document.querySelector(s);
+let LOCAL = false;        // serverless mode: files live in the browser
+
+/* every backend call goes through here; in local mode it is answered
+   by the in-page port of the engine instead of HTTP */
+async function api(path, body) {
+  if (LOCAL) return localApi(path, body);
+  const r = await fetch(path, body === undefined ? undefined
+    : { method: "POST", body: JSON.stringify(body) });
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  return { ok: r.ok, data };
+}
+
+async function detectMode() {
+  if (location.protocol === "file:") return true;
+  try {
+    const r = await fetch("/api/state?ctx=0");
+    return !r.ok ||
+      !(r.headers.get("Content-Type") || "").includes("json");
+  } catch (e) { return true; }
+}
 const esc = t => t.replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -566,7 +596,8 @@ function card(s) {
               data-do="rejected">✕ Reject<kbd>r</kbd></button>
       <button class="act" data-do="pending">↩ Undo<kbd>u</kbd></button>
       ${s.status !== "applied"
-        ? `<button class="act" data-do="edit">✎ Edit<kbd>e</kbd></button>` : ""}
+        ? `<button class="act" data-do="edit">✎ Edit<kbd>e</kbd></button>`
+        : `<button class="act" data-do="revert">↶ Revert</button>`}
       <span class="keyhint">j/k move</span>
     </div>
   </article>`;
@@ -626,7 +657,10 @@ function render() {
   const empty = $("#empty");
   empty.hidden = list.length > 0;
   empty.textContent = STATE.suggestions.length === 0
-    ? "No suggestions loaded — point the agent at suggestions.json."
+    ? (LOCAL
+       ? "Local mode: drop your .tex file(s) and review .json passes " +
+         "here (or use 📂 Open)."
+       : "No suggestions loaded — point the agent at suggestions.json.")
     : "Nothing in this filter. Every manuscript deserves a clean desk.";
   const c = { pending: 0, accepted: 0, rejected: 0, applied: 0 };
   STATE.suggestions.forEach(s => c[s.status]++);
@@ -792,9 +826,8 @@ async function submitSug() {
     tags: nsTags(),
     author: USER || undefined,
   };
-  const r = await fetch(edit ? "/api/edit" : "/api/suggest",
-                        { method: "POST", body: JSON.stringify(body) });
-  const rep = await r.json();
+  const r = await api(edit ? "/api/edit" : "/api/suggest", body);
+  const rep = r.data;
   if (!r.ok) { toast(`could not ${d._mode}: ${rep.error}`); return; }
   d.close();
   if (!edit) {
@@ -854,10 +887,10 @@ async function renderDoc() {
   }
   if (DOC.stale || DOC.fkey !== s.fkey) {
     const req = ++docReq;
-    const r = await fetch(`/api/file?id=${encodeURIComponent(s.id)}`);
+    const r = await api(`/api/file?id=${encodeURIComponent(s.id)}`);
     if (req !== docReq) return;                // superseded
     DOC = { fkey: s.fkey, stale: false,
-            text: r.ok ? (await r.json()).text : null };
+            text: r.ok ? r.data.text : null };
   }
   $("#docfile").textContent = s.file;
   if (DOC.text === null) {
@@ -887,32 +920,115 @@ function setCtx(n) {
 
 /* ---- api ---- */
 async function refresh() {
-  STATE = await (await fetch(`/api/state?ctx=${CTX}`)).json();
+  STATE = (await api(`/api/state?ctx=${CTX}`)).data;
+  // don't let a fetch that raced an unsynced decision snap the UI back
+  PENDING.forEach((status, id) => {
+    const s = STATE.suggestions.find(x => x.id === id);
+    if (s && s.status !== "applied") s.status = status;
+  });
   DOC.stale = true;   // files may have changed (e.g. after apply)
   if (SEL === null && STATE.suggestions.length)
     SEL = (STATE.suggestions.find(s => s.status === "pending")
            || STATE.suggestions[0]).id;
   render();
 }
-async function decide(id, status) {
+/* decisions are optimistic and debounced: the UI updates instantly,
+   the backend is synced in one batch shortly after the last keypress
+   (rapid a/r runs used to fire a POST + full refetch per key) */
+const PENDING = new Map();               // id -> status awaiting sync
+let flushTimer = null, flushPromise = null;
+
+function decide(id, status) {
   const s = STATE.suggestions.find(x => x.id === id);
   if (!s || s.status === "applied") return;
-  s.status = status;                      // optimistic
+  s.status = status;                     // optimistic
+  PENDING.set(id, status);
   render();
-  await fetch("/api/decide", { method: "POST",
-    body: JSON.stringify({ id, status }) });
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(flushDecisions, 300);
+}
+
+function flushDecisions() {
+  if (!flushPromise)
+    flushPromise = (async () => {
+      try {
+        while (PENDING.size) {
+          const batch = [...PENDING];
+          PENDING.clear();
+          for (const [id, status] of batch)
+            await api("/api/decide", { id, status });
+        }
+        await refresh();
+      } finally {
+        flushPromise = null;
+        if (PENDING.size)              // raced in during refresh
+          flushTimer = setTimeout(flushDecisions, 100);
+      }
+    })();
+  return flushPromise;
+}
+async function revertSug(id) {
+  const r = await api("/api/revert", { id });
+  toast(r.ok ? `reverted ${id} (back to pending)` : r.data.error);
   refresh();
 }
+
+async function purgeAll() {
+  const n = STATE.suggestions.filter(
+    s => s.status === "applied" || s.status === "rejected").length;
+  if (!n) { toast("nothing to purge"); return; }
+  if (!confirm(`Remove ${n} applied/rejected suggestion(s) from the ` +
+               `review files? Pass files are rewritten — commit first ` +
+               `if unsure.`)) return;
+  clearTimeout(flushTimer);
+  await flushDecisions();
+  const r = await api("/api/purge", {});
+  toast(r.ok ? `purged ${r.data.removed.length} suggestion(s)`
+             : r.data.error);
+  refresh();
+}
+
 async function applyAll() {
   const n = STATE.suggestions.filter(s => s.status === "accepted").length;
   if (!n || !confirm(`Apply ${n} accepted change(s) to the files? ` +
                      `A .bak copy is kept next to each file.`)) return;
-  const rep = await (await fetch("/api/apply", { method: "POST" })).json();
+  clearTimeout(flushTimer);
+  await flushDecisions();          // sync outstanding decisions first
+  const rep = (await api("/api/apply", {})).data;
   toast(`applied ${rep.applied.length}` +
         (rep.skipped.length ? ` · skipped ${rep.skipped.length} ` +
           `(${rep.skipped.map(s => s.id + ": " + s.reason).join(", ")})` : ""));
   refresh();
 }
+/* ---- live auto-refresh: pick up new agent passes while reviewing ---- */
+function stateSig(st) {
+  return JSON.stringify((st.suggestions || []).map(s =>
+    [s.key, s.status, (s.replies || []).length, s.edited, s.new]));
+}
+async function pollState() {
+  if (LOCAL) return;               // nothing changes behind our back
+  if (PENDING.size || flushPromise) return;   // decisions in flight
+  if (document.hidden || $("#help").open || $("#newsug").open ||
+      REDIT !== null ||
+      document.activeElement?.matches("input, textarea") ||
+      !window.getSelection()?.isCollapsed)
+    return;                        // don't yank state mid-interaction
+  try {
+    const fresh = await (await fetch(`/api/state?ctx=${CTX}`)).json();
+    if (stateSig(fresh) === stateSig(STATE)) return;
+    const known = new Set(STATE.suggestions.map(s => s.key));
+    const added = fresh.suggestions.filter(s => !known.has(s.key)).length;
+    STATE = fresh;
+    DOC.stale = true;
+    if (SEL !== null && !STATE.suggestions.some(s => s.id === SEL))
+      SEL = (STATE.suggestions.find(s => s.status === "pending")
+             || STATE.suggestions[0] || { id: null }).id;
+    render();
+    if (added) toast(`${added} new suggestion${added > 1 ? "s" : ""}`);
+  } catch (e) { /* server briefly away — retry next tick */ }
+}
+setInterval(pollState, 3000);
+
 function toast(msg) {
   const t = $("#toast");
   t.textContent = msg; t.style.display = "block";
@@ -925,6 +1041,7 @@ document.addEventListener("click", e => {
   if (e.target.closest("#texBtn")) { toggleTex(); return; }
   if (e.target.closest("#docBtn")) { toggleDoc(); return; }
   if (e.target.closest("#helpBtn")) { $("#help").showModal(); return; }
+  if (e.target.closest("#purgeBtn")) { purgeAll(); return; }
   if (e.target.closest("#addBtn")) { openNewSug(); return; }
   if (e.target.closest("#nsCreate")) { submitSug(); return; }
   const nstag = e.target.closest("[data-nstag]");
@@ -962,6 +1079,7 @@ document.addEventListener("click", e => {
   const act = e.target.closest(".act");
   if (act && cardEl) {
     if (act.dataset.do === "edit") openEditSug(cardEl.dataset.id);
+    else if (act.dataset.do === "revert") revertSug(cardEl.dataset.id);
     else decide(cardEl.dataset.id, act.dataset.do);
   }
   else if (cardEl) render();
@@ -1003,6 +1121,491 @@ document.addEventListener("keydown", e => {
   else if (k === "A") applyAll();
 });
 
+/* ================= local (serverless) backend =================
+   Static-hosting mode: the same UI, but files are loaded into the
+   browser and the engine below answers every /api/* call. Nothing
+   leaves the machine; "⬇ Save" downloads the edited files plus
+   decisions.json / manual.json / comments.json (all byte-compatible
+   with the Python tool). */
+
+/* LOCAL-BACKEND-BEGIN */
+const LS = { files: new Map(), passes: [], decisions: {}, comments: {},
+             manual: null, dirty: new Set(), dirtyPasses: new Set() };
+
+/* LOCAL-CORE-BEGIN */
+function sha1hex(str) {
+  const data = new TextEncoder().encode(str);
+  const ml = data.length;
+  const buf = new Uint8Array((((ml + 8) >> 6) + 1) << 6);
+  buf.set(data);
+  buf[ml] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(buf.length - 4, (ml << 3) >>> 0);
+  dv.setUint32(buf.length - 8, Math.floor(ml / 0x20000000));
+  let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE,
+      h3 = 0x10325476, h4 = 0xC3D2E1F0;
+  const w = new Uint32Array(80);
+  for (let i = 0; i < buf.length; i += 64) {
+    for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j * 4);
+    for (let j = 16; j < 80; j++) {
+      const n = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16];
+      w[j] = (n << 1) | (n >>> 31);
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4;
+    for (let j = 0; j < 80; j++) {
+      let f, k;
+      if (j < 20)      { f = (b & c) | (~b & d);           k = 0x5A827999; }
+      else if (j < 40) { f = b ^ c ^ d;                    k = 0x6ED9EBA1; }
+      else if (j < 60) { f = (b & c) | (b & d) | (c & d);  k = 0x8F1BBCDC; }
+      else             { f = b ^ c ^ d;                    k = 0xCA62C1D6; }
+      const t = (((a << 5) | (a >>> 27)) + f + e + k + w[j]) | 0;
+      e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = t;
+    }
+    h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0;
+    h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+  }
+  return [h0, h1, h2, h3, h4]
+    .map(x => (x >>> 0).toString(16).padStart(8, "0")).join("");
+}
+
+/* content key identical to Python's content_key(): sha1 of the
+   json.dumps list (", " separators, null for absent occurrence) */
+function pyKey(s) {
+  const enc = v => v === undefined || v === null
+    ? "null" : JSON.stringify(v);
+  return sha1hex("[" + [s.file, s.old, s.new, s.occurrence]
+    .map(enc).join(", ") + "]").slice(0, 12);
+}
+
+function jsLocate(text, s, ctx = 1) {
+  const M = (state, o = {}) => ({ state, start: -1, end: -1, count: 0,
+                                  line: 0, context: "", ctx_start: 0,
+                                  ...o });
+  if (text === null || text === undefined) return M("bad-file");
+  const old = s.old || "";
+  if (!old) return M("missing");
+  const hits = [];
+  let i = text.indexOf(old);
+  while (i !== -1) { hits.push(i); i = text.indexOf(old, i + 1); }
+  if (!hits.length) return M("missing");
+  let occ = s.occurrence;
+  if (occ === undefined || occ === null) {
+    if (hits.length > 1) return M("ambiguous", { count: hits.length });
+    occ = 1;
+  }
+  if (occ < 1 || occ > hits.length)
+    return M("missing", { count: hits.length });
+  const start = hits[occ - 1], end = start + old.length;
+  const line = (text.slice(0, start).match(/\n/g) || []).length + 1;
+  let a = text.lastIndexOf("\n", start - 1) + 1;
+  for (let j = 0; j < Math.max(0, ctx) && a !== 0; j++)
+    a = text.lastIndexOf("\n", a - 2) + 1;
+  let b = text.indexOf("\n", end);
+  for (let j = 0; j < Math.max(0, ctx) && b !== -1; j++)
+    b = text.indexOf("\n", b + 1);
+  if (b === -1) b = text.length;
+  return M("ok", { start, end, count: hits.length, line,
+                   context: text.slice(a, b), ctx_start: start - a });
+}
+/* LOCAL-CORE-END */
+
+function resolveFile(name) {
+  if (LS.files.has(name)) return name;
+  const base = (name || "").split("/").pop();
+  return LS.files.has(base) ? base : null;
+}
+
+function localState(ctx = 1) {
+  const suggestions = [], passReplies = [];
+  for (const p of LS.passes) {
+    const doc = p.doc;
+    const items = Array.isArray(doc) ? doc : (doc.suggestions || []);
+    if (!Array.isArray(doc))
+      for (const r of doc.replies || [])
+        if (r.to && r.text) passReplies.push([r.to, r]);
+    items.forEach((raw, i) => {
+      const s = { ...raw };
+      s.key = pyKey(s);
+      s.id = s.id ?? `${p.name.replace(/\.json$/, "")}#${i + 1}`;
+      s.source = p.name;
+      const dec = LS.decisions[s.key];
+      if (typeof dec === "string") s.status = dec;
+      else if (dec && typeof dec === "object") {
+        s.status = dec.status || "pending";
+        for (const f of ["new", "reasoning", "tags"])
+          if (f in dec) { s[f] = dec[f]; s.edited = true; }
+        if ("applied_at" in dec) s.applied_at = dec.applied_at;
+      } else s.status = "pending";
+      suggestions.push(s);
+    });
+  }
+  const seen = new Set(), ids = new Set(), uniq = [];
+  for (const s of suggestions) {
+    if (seen.has(s.key)) continue;
+    seen.add(s.key);
+    while (ids.has(s.id)) s.id += "'";
+    ids.add(s.id);
+    uniq.push(s);
+  }
+  const idk = new Map(uniq.map(s => [s.id, s.key]));
+  const keys = new Set(uniq.map(s => s.key));
+  const merged = {};
+  for (const [to, r] of passReplies) {
+    const k = keys.has(to) ? to : idk.get(to);
+    if (k) (merged[k] ??= []).push(r);
+  }
+  for (const [k, lst] of Object.entries(LS.comments))
+    (merged[k] ??= []).push(
+      ...lst.map((r, i) => ({ ...r, editable: true, ci: i })));
+  for (const s of uniq) {
+    const reps = [...(s.replies || []), ...(merged[s.key] || [])];
+    if (reps.length)
+      s.replies = reps.sort((x, y) =>
+        (x.date || "") < (y.date || "") ? -1 : 1);
+    else delete s.replies;
+  }
+  const rows = uniq.map(s => {
+    const rf = resolveFile(s.file);
+    const m = jsLocate(rf === null ? null : LS.files.get(rf), s, ctx);
+    return { ...s, fkey: rf || s.file || "?", _rf: rf, match: m };
+  });
+  const byFile = {};
+  rows.forEach(r => {
+    if (r.match.state === "ok" && r.status !== "applied")
+      (byFile[r.fkey] ??= []).push(r);
+  });
+  for (const list of Object.values(byFile)) {
+    list.sort((x, y) => x.match.start - y.match.start);
+    for (let i = 1; i < list.length; i++) {
+      const p = list[i - 1], q = list[i];
+      if (q.match.start < p.match.end &&
+          p.status === "accepted" && q.status === "accepted")
+        p.match.state = q.match.state = "overlap";
+    }
+  }
+  return { source: "(local files — nothing leaves this browser)",
+           user: "you", suggestions: rows };
+}
+
+const localFind = id =>
+  localState(0).suggestions.find(s => s.id === id);
+const nowIso = () => new Date().toISOString().slice(0, 19) + "Z";
+
+function localApply() {
+  const rows = localState(0).suggestions;
+  const todo = rows.filter(r => r.status === "accepted");
+  const good = todo.filter(r => r.match.state === "ok");
+  const skipped = todo.filter(r => r.match.state !== "ok")
+    .map(r => ({ id: r.id, reason: r.match.state }));
+  const byFile = {};
+  good.forEach(r => (byFile[r._rf] ??= []).push(r));
+  const applied = [];
+  for (const [file, group] of Object.entries(byFile)) {
+    let text = LS.files.get(file);
+    const done = [];
+    for (const r of [...group].sort((x, y) => y.match.start - x.match.start)) {
+      const a = r.match.start, b = r.match.end;
+      if (text.slice(a, b) !== r.old) {
+        skipped.push({ id: r.id, reason: "shifted" });
+        continue;
+      }
+      text = text.slice(0, a) + (r.new || "") + text.slice(b);
+      applied.push(r.id);
+      done.push([r, a]);
+    }
+    LS.files.set(file, text);
+    LS.dirty.add(file);
+    for (const [r, a] of done) {
+      const delta = done.filter(([, xa]) => xa < a)
+        .reduce((t, [x]) => t + (x.new || "").length - x.old.length, 0);
+      const cur = LS.decisions[r.key];
+      LS.decisions[r.key] = { ...(typeof cur === "object" ? cur : {}),
+                              status: "applied", applied_at: a + delta };
+    }
+  }
+  return { applied, skipped };
+}
+
+function localRevert(s) {
+  const nw = s.new || "", old = s.old || "";
+  if (!nw) return "deleted-text";
+  const text = LS.files.get(s._rf);
+  if (text === undefined) return "bad-file";
+  let pos;
+  if (Number.isInteger(s.applied_at) &&
+      text.slice(s.applied_at, s.applied_at + nw.length) === nw)
+    pos = s.applied_at;
+  else {
+    const hits = [];
+    let i = text.indexOf(nw);
+    while (i !== -1) { hits.push(i); i = text.indexOf(nw, i + 1); }
+    if (!hits.length) return "missing";
+    if (hits.length > 1) return "ambiguous";
+    pos = hits[0];
+  }
+  LS.files.set(s._rf, text.slice(0, pos) + old + text.slice(pos + nw.length));
+  LS.dirty.add(s._rf);
+  const cur = LS.decisions[s.key];
+  if (cur && typeof cur === "object") {
+    delete cur.applied_at;
+    if (Object.keys(cur).some(k => k !== "status")) cur.status = "pending";
+    else delete LS.decisions[s.key];
+  } else delete LS.decisions[s.key];
+  return null;
+}
+
+function localSetStatus(key, status) {
+  const cur = LS.decisions[key];
+  if (cur && typeof cur === "object") cur.status = status;
+  else if (status === "pending") delete LS.decisions[key];
+  else LS.decisions[key] = status;
+}
+
+async function localApi(path, body) {
+  const [p, q] = path.split("?");
+  const params = new URLSearchParams(q || "");
+  const err = msg => ({ ok: false, data: { error: msg } });
+  const ok = (data = { ok: true }) => ({ ok: true, data });
+
+  if (p === "/api/state") {
+    const n = parseInt(params.get("ctx") ?? "1", 10);
+    return ok(localState(
+      Number.isFinite(n) ? Math.max(0, Math.min(99, n)) : 1));
+  }
+  if (p === "/api/file") {
+    const s = localFind(params.get("id"));
+    if (!s) return err("unknown id");
+    const text = s._rf === null ? null : LS.files.get(s._rf);
+    if (text == null) return err("file unreadable");
+    return ok({ file: s.file, text });
+  }
+  if (p === "/api/decide") {
+    const s = localFind(body.id);
+    if (!s) return err("unknown id");
+    if (s.status === "applied") return err("already applied");
+    if (!["pending", "accepted", "rejected"].includes(body.status))
+      return err("bad status");
+    localSetStatus(s.key, body.status);
+    return ok();
+  }
+  if (p === "/api/apply") return ok(localApply());
+  if (p === "/api/revert") {
+    const s = localFind(body.id);
+    if (!s) return err("unknown id");
+    if (s.status !== "applied") return err("not applied");
+    const reason = localRevert(s);
+    return reason === null ? ok() : err(`cannot revert: ${reason}`);
+  }
+  if (p === "/api/suggest") {
+    const { file, old } = body, nw = body.new;
+    if (!file || !old || typeof nw !== "string")
+      return err("file, old and new are required");
+    const s = { file, old, new: nw };
+    if (body.occurrence != null) {
+      if (!Number.isInteger(body.occurrence) || body.occurrence < 1)
+        return err("bad occurrence");
+      s.occurrence = body.occurrence;
+    }
+    if (body.reasoning) s.reasoning = String(body.reasoning);
+    if (body.tags?.length)
+      s.tags = body.tags.map(String).filter(t => t.trim());
+    const dup = localState(0).suggestions.find(x => x.key === pyKey(s));
+    if (dup) return ok({ id: dup.id, existing: true });
+    const rf = resolveFile(file);
+    const m = jsLocate(rf === null ? null : LS.files.get(rf), s, 0);
+    if (m.state !== "ok") return err(`anchor ${m.state}`);
+    s.author = body.author || USER || "you";
+    s.date = nowIso();
+    if (!LS.manual) {
+      LS.manual = { version: 1, base_dir: "..", suggestions: [] };
+      LS.passes.push({ name: "manual.json", doc: LS.manual });
+      LS.passes.sort((x, y) => x.name.localeCompare(y.name));
+    }
+    const taken = new Set(localState(0).suggestions.map(x => x.id));
+    LS.manual.suggestions.forEach(x => taken.add(x.id));
+    let n = 1;
+    while (taken.has(`m${String(n).padStart(3, "0")}`)) n++;
+    s.id = `m${String(n).padStart(3, "0")}`;
+    LS.manual.suggestions.push(s);
+    return ok({ id: s.id });
+  }
+  if (p === "/api/edit") {
+    const s = localFind(body.id);
+    if (!s) return err("unknown id");
+    if (s.status === "applied") return err("already applied");
+    const fields = {};
+    if (typeof body.new === "string") fields.new = body.new;
+    if ("reasoning" in body) fields.reasoning = String(body.reasoning);
+    if ("tags" in body)
+      fields.tags = (body.tags || []).map(String).filter(t => t.trim());
+    if (!Object.keys(fields).length) return err("nothing to edit");
+    const cur = LS.decisions[s.key];
+    LS.decisions[s.key] = {
+      ...(cur && typeof cur === "object" ? cur : {}),
+      ...fields, status: s.status };
+    return ok();
+  }
+  if (p === "/api/reply") {
+    const s = localFind(body.id);
+    if (!s) return err("unknown id");
+    const text = String(body.text || "").trim();
+    if (!text) return err("empty reply");
+    (LS.comments[s.key] ??= []).push(
+      { text, author: body.author || USER || "you", date: nowIso() });
+    return ok();
+  }
+  if (p === "/api/purge") {
+    const sts = new Set(body.statuses || ["applied", "rejected"]);
+    const rows = localState(0).suggestions;
+    const doomedKeys = new Set(
+      rows.filter(r => sts.has(r.status)).map(r => r.key));
+    const doomedIds = new Set(
+      rows.filter(r => doomedKeys.has(r.key)).map(r => r.id));
+    const report = { removed: [...doomedIds].sort(),
+                     rewritten: [], deleted: [] };
+    if (!doomedKeys.size) return ok(report);
+    for (const pass of [...LS.passes]) {
+      const doc = pass.doc;
+      const items = Array.isArray(doc) ? doc : (doc.suggestions || []);
+      const kept = items.filter(s => !doomedKeys.has(pyKey(s)));
+      let changed = kept.length !== items.length;
+      if (Array.isArray(doc)) pass.doc = kept;
+      else {
+        doc.suggestions = kept;
+        if (doc.replies) {
+          const rk = doc.replies.filter(
+            r => !doomedKeys.has(r.to) && !doomedIds.has(r.to));
+          changed |= rk.length !== doc.replies.length;
+          if (rk.length) doc.replies = rk;
+          else delete doc.replies;
+        }
+      }
+      if (!changed) continue;
+      const reps = Array.isArray(pass.doc) ? [] : (pass.doc.replies || []);
+      if (!kept.length && !reps.length) {
+        LS.passes = LS.passes.filter(x => x !== pass);
+        LS.dirtyPasses.delete(pass.name);
+        if (pass.name === "manual.json") LS.manual = null;
+        report.deleted.push(pass.name);
+      } else {
+        LS.dirtyPasses.add(pass.name);
+        report.rewritten.push(pass.name);
+      }
+    }
+    for (const k of doomedKeys) {
+      delete LS.decisions[k];
+      delete LS.comments[k];
+    }
+    return ok(report);
+  }
+  if (p === "/api/reply_edit") {
+    const s = localFind(body.id);
+    if (!s) return err("unknown reply");
+    if (!Number.isInteger(body.ci)) return err("bad ci");
+    const lst = LS.comments[s.key] || [];
+    if (body.ci < 0 || body.ci >= lst.length) return err("unknown reply");
+    const text = String(body.text || "").trim();
+    if (text) lst[body.ci].text = text;
+    else {
+      lst.splice(body.ci, 1);
+      if (!lst.length) delete LS.comments[s.key];
+    }
+    return ok();
+  }
+  return err("not found");
+}
+/* LOCAL-BACKEND-END */
+
+async function openFiles(fileList) {
+  let loaded = 0;
+  for (const f of fileList) {
+    const text = await f.text();
+    if (f.name.endsWith(".json")) {
+      let doc;
+      try { doc = JSON.parse(text); }
+      catch (e) { toast(`${f.name}: invalid JSON`); continue; }
+      if (f.name === "decisions.json") LS.decisions = doc;
+      else if (f.name === "comments.json") LS.comments = doc;
+      else {
+        LS.passes = LS.passes.filter(x => x.name !== f.name);
+        LS.passes.push({ name: f.name, doc });
+        LS.passes.sort((x, y) => x.name.localeCompare(y.name));
+        if (f.name === "manual.json") LS.manual = doc;
+      }
+    } else {
+      LS.files.set(f.name, text);
+    }
+    loaded++;
+  }
+  if (loaded) toast(`loaded ${loaded} file${loaded > 1 ? "s" : ""}`);
+  SEL = null;
+  refresh();
+}
+
+function downloadFile(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(
+    new Blob([text], { type: "application/octet-stream" }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+async function downloadAll() {
+  const pause = () => new Promise(r => setTimeout(r, 200));
+  let n = 0;
+  for (const name of LS.dirty) {
+    downloadFile(name.split("/").pop(), LS.files.get(name));
+    n++;
+    await pause();
+  }
+  const dump = o => JSON.stringify(o, null, 2) + "\n";
+  for (const name of LS.dirtyPasses) {   // passes rewritten by purge
+    if (name === "manual.json") continue;      // handled below
+    const pass = LS.passes.find(x => x.name === name);
+    if (pass) { downloadFile(name, dump(pass.doc)); n++; await pause(); }
+  }
+  if (Object.keys(LS.decisions).length) {
+    downloadFile("decisions.json", dump(LS.decisions));
+    n++;
+    await pause();
+  }
+  if (LS.manual && LS.manual.suggestions.length) {
+    downloadFile("manual.json", dump(LS.manual));
+    n++;
+    await pause();
+  }
+  if (Object.keys(LS.comments).length) {
+    downloadFile("comments.json", dump(LS.comments));
+    n++;
+  }
+  toast(n ? `downloaded ${n} file${n > 1 ? "s" : ""}`
+          : "nothing to save yet");
+}
+
+/* if the tab closes inside the debounce window, fire the decisions
+   as beacons so nothing is lost */
+addEventListener("pagehide", () => {
+  if (LOCAL || !navigator.sendBeacon) return;
+  for (const [id, status] of PENDING)
+    navigator.sendBeacon("/api/decide", JSON.stringify({ id, status }));
+  PENDING.clear();
+});
+
+$("#openBtn").addEventListener("click", () => $("#fileIn").click());
+$("#fileIn").addEventListener("change", e => {
+  openFiles([...e.target.files]);
+  e.target.value = "";
+});
+$("#dlBtn").addEventListener("click", downloadAll);
+document.addEventListener("dragover",
+  e => { if (LOCAL) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  if (!LOCAL) return;
+  e.preventDefault();
+  openFiles([...e.dataTransfer.files]);
+});
+
 $("#ctx").value = CTX;
 $("#ctx").addEventListener("change", e => setCtx(+e.target.value));
 $("#userIn").value = USER;
@@ -1022,16 +1625,15 @@ $("#fileSel").addEventListener("change", e => {
 document.addEventListener("keydown", e => {
   if (e.target.id === "replyIn" && e.key === "Enter" &&
       e.target.value.trim()) {
-    fetch("/api/reply", { method: "POST", body: JSON.stringify(
-      { id: SEL, text: e.target.value, author: USER || undefined },
-    ) }).then(refresh);
+    api("/api/reply",
+        { id: SEL, text: e.target.value, author: USER || undefined })
+      .then(refresh);
   }
   if (e.target.classList?.contains("redit")) {
     if (e.key === "Enter") {
       const body = { id: REDIT.id, ci: REDIT.ci, text: e.target.value };
       REDIT = null;
-      fetch("/api/reply_edit",
-            { method: "POST", body: JSON.stringify(body) }).then(refresh);
+      api("/api/reply_edit", body).then(refresh);
     } else if (e.key === "Escape") {
       REDIT = null;
       render();
@@ -1104,7 +1706,14 @@ $("#sideBtn").addEventListener("click", () => {
 });
 applyDocPrefs();
 
-refresh();
+(async () => {
+  LOCAL = await detectMode();
+  if (LOCAL) {
+    $("#localbar").hidden = false;
+    $("#source").textContent = "local mode — files stay in this browser";
+  }
+  refresh();
+})();
 </script>
 </body>
 </html>

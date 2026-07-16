@@ -13,7 +13,7 @@ import sys
 from importlib.resources import files
 from pathlib import Path
 
-from .core import Store, annotate, apply_accepted
+from .core import VALID_STATUSES, Store, annotate, apply_accepted
 from .server import serve
 
 
@@ -67,6 +67,27 @@ def cmd_apply(args) -> int:
     return 0
 
 
+def cmd_purge(args) -> int:
+    store = _load_store(args.target)
+    if store is None:
+        return 1
+    statuses = {s.strip() for s in args.status.split(",") if s.strip()}
+    bad = statuses - VALID_STATUSES
+    if bad:
+        print(f"error: unknown status(es): {', '.join(sorted(bad))}",
+              file=sys.stderr)
+        return 1
+    rep = store.purge(statuses, dry_run=args.dry_run)
+    verb = "would remove" if args.dry_run else "removed"
+    print(f"{verb} {len(rep['removed'])}: "
+          f"{', '.join(rep['removed']) or '-'}")
+    for f in rep["rewritten"]:
+        print(f"rewrote {f}")
+    for f in rep["deleted"]:
+        print(f"deleted {f}")
+    return 0
+
+
 def cmd_instruct(args) -> int:
     pkg = files("texreview")
     schema = pkg.joinpath("schema.json").read_text(encoding="utf-8")
@@ -104,6 +125,18 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("check", help="validate that all anchors resolve")
     _add_target(p)
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser(
+        "purge",
+        help="remove resolved suggestions from pass files to reduce "
+             "churn (destructive; --dry-run to preview)")
+    _add_target(p)
+    p.add_argument("--status", default="applied,rejected",
+                   help="comma-separated statuses to purge "
+                        "(default: applied,rejected)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="only report what would be removed")
+    p.set_defaults(func=cmd_purge)
 
     p = sub.add_parser(
         "instruct",

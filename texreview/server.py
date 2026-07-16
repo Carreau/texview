@@ -185,6 +185,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.store.edit(s["id"], fields)
             return self._json({"ok": True})
 
+        if self.path == "/api/purge":
+            sts = body.get("statuses") or ["applied", "rejected"]
+            if not isinstance(sts, list) \
+                    or set(map(str, sts)) - VALID_STATUSES:
+                return self._json({"error": "bad statuses"}, 400)
+            with self.store.lock:
+                rep = self.store.purge(set(map(str, sts)))
+            return self._json(rep)
+
+        if self.path == "/api/revert":
+            with self.store.lock:
+                s = self.store.suggestion(body.get("id"))
+                if s is None:
+                    return self._json({"error": "unknown id"}, 404)
+                if s["status"] != "applied":
+                    return self._json({"error": "not applied"}, 409)
+                res = self.store.revert(s["id"])
+            if res is True:
+                return self._json({"ok": True})
+            return self._json({"error": f"cannot revert: {res}"}, 409)
+
         if self.path == "/api/apply":
             with self.store.lock:
                 return self._json(apply_accepted(self.store))

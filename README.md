@@ -143,6 +143,28 @@ Schema. The same text lives in
 Skipped suggestions are never silently applied — the apply report lists
 them, and they stay `accepted` so you can fix and re-apply.
 
+## No-install / static mode
+
+The UI is a single self-contained page: host `texreview/static/
+index.html` anywhere static (a GitHub Pages deploy workflow is
+included) or just open it from disk, and it switches to **local
+mode** — drop your `.tex` file(s) and review `.json` passes onto the
+page, review and apply entirely in the browser (nothing is uploaded),
+then hit **⬇ Save** to download the edited files plus
+`decisions.json`/`manual.json`/`comments.json`. Those files are fully
+compatible with the CLI, so you can move between modes freely.
+
+## Housekeeping
+
+Once suggestions are applied or rejected they only add noise and repo
+size. `tex-review purge review/` (or the **🧹 Purge** button in the
+UI) removes them from the pass files
+(deleting files left empty) and prunes the matching entries from
+`decisions.json`/`comments.json`; pending and accepted suggestions,
+and replies to them, are untouched. Preview with `--dry-run`, choose
+what to drop with `--status rejected`. This is the one command that
+rewrites pass files — commit first.
+
 ## Git tip
 
 Commit the manuscript before applying; then `review/` passes,

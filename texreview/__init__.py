@@ -9,4 +9,4 @@ changes on the same line never collide.
 Stdlib only. Python 3.9+.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

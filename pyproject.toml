@@ -4,19 +4,24 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "tex-review"
-version = "0.1.0"
+version = "0.2.0"
 description = "Review agent-suggested edits to LaTeX manuscripts one change at a time, then apply only the accepted ones."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
 authors = [{ name = "M Bussonnier", email = "bussonniermatthias@gmail.com" }]
 keywords = ["latex", "review", "agent", "diff"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
     "Environment :: Web Environment",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Topic :: Text Processing :: Markup :: LaTeX",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]
 
 [project.urls]
 Home = "https://github.com/carreau/texview"

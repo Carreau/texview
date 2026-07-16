@@ -20,7 +20,8 @@ Installable package (flit, `pyproject.toml`, console script
   matching, apply engine.
 - `texreview/server.py` — HTTP server (stdlib `http.server`) + `serve()`.
 - `texreview/cli.py` — argparse CLI: `review` (alias `serve`), `apply`,
-  `check`, `instruct` (prints agent prompt + JSON schema).
+  `check`, `purge` (remove resolved suggestions; `--dry-run`,
+  `--status`), `instruct` (prints agent prompt + JSON schema).
 - `texreview/static/index.html` — the whole UI, single file, vanilla
   JS, no build step. Loaded via `importlib.resources`.
 - `texreview/instructions.md` — canonical self-contained prompt for a
@@ -42,7 +43,26 @@ Installable package (flit, `pyproject.toml`, console script
 - Server binds localhost only.
 - Single-file mode (`suggestions.json`) must keep working.
 - Agent pass files (`review/NNNN-*.json`) are strictly read-only to
-  this tool — never written, never rewritten.
+  this tool — never written, never rewritten. Single deliberate
+  exception: the explicitly human-invoked `tex-review purge`, which
+  removes resolved suggestions from pass files (and prunes
+  decisions/comments); nothing in the review/serve/apply flow ever
+  writes them.
+
+## Three run modes
+
+Server mode (the two storage layouts below), and **local mode**: the
+same `index.html` served statically (GitHub Pages via
+`.github/workflows/pages.yml`, or `file://`). On load, `detectMode()`
+probes `/api/state`; without a server, every `api()` call is answered
+by an in-page engine (`LOCAL-BACKEND` block) that mirrors the Python
+core over files loaded via 📂 Open / drag-drop; ⬇ Save downloads the
+edited `.tex` files + `decisions.json` / `manual.json` /
+`comments.json`. Content keys and matching are byte-compatible with
+Python — enforced by `tests/test_static_parity.py`, which extracts the
+`LOCAL-CORE`/`LOCAL-BACKEND` marker blocks and runs them under node
+against the Python core. If you change `content_key`, `locate`, apply
+or decisions semantics, change BOTH implementations.
 
 ## Two storage modes
 
@@ -89,6 +109,13 @@ Installable package (flit, `pyproject.toml`, console script
 - One-time `<file>.bak` backup per file.
 - Applied items become status `applied` (in `decisions.json` or the
   single file). Agent pass files are never written.
+- Apply records `applied_at` (the replacement's offset in the final
+  text) alongside the status; `Store.revert` undoes an applied
+  suggestion (`new` -> `old`) via that hint, falling back to a unique
+  match of `new`, else fails with a reason (`ambiguous`/`missing`/
+  `deleted-text` for `new == ""`). Revert sets status back to
+  `pending` and clears `applied_at`. No new `.bak` — `.bak` stays the
+  pre-apply snapshot.
 - All JSON writes are tmp-file + atomic replace.
 
 ## HTTP API
@@ -115,6 +142,12 @@ Installable package (flit, `pyproject.toml`, console script
   non-applied suggestion via `Store.edit` (decisions.json override in
   dir mode, in-place in single-file mode); sets `edited: true`.
 - `POST /api/apply` → `{applied: [...], skipped: [{id, reason}]}`.
+- `POST /api/revert {id}` → `{ok}`; 404 unknown, 409 not-applied or
+  unrevertable (reason in `error`). UI: `↶ Revert` on applied cards.
+- `POST /api/purge {statuses?}` → purge report (defaults
+  applied+rejected). UI: `🧹 Purge` toolbar button (confirm dialog,
+  flushes pending decisions first). In local mode, purged pass files
+  are marked dirty and included in ⬇ Save.
 
 ## UI notes
 
@@ -137,6 +170,11 @@ Installable package (flit, `pyproject.toml`, console script
   a per-file `<select>` (keyed by `fkey`, hidden when only one file
   has suggestions; choosing a file moves the selection — and the doc
   pane — into it). Status ∩ tag ∩ file all combine.
+- Live auto-refresh: a 3 s `pollState` interval refetches
+  `/api/state`, compares a cheap signature (key/status/replies/edited/
+  new), and re-renders only on change (toast for new suggestions).
+  Ticks are skipped while hidden, a dialog is open, a reply is being
+  edited, an input has focus, or a doc-pane selection is active.
 - Reply threads are a full-width `.thread` section between diff/note
   and the action buttons; the selected card has an inline reply input
   (Enter posts to `/api/reply`). Human replies show a hover `✎` that
@@ -177,13 +215,18 @@ Installable package (flit, `pyproject.toml`, console script
 ## How to verify changes
 
 ```
-pip install .                                # flit_core build backend
+pip install -e ".[test]"                     # flit_core build backend
+python -m pytest                             # the real gate — keep green
 tex-review check example/review              # anchors resolve
-tex-review review example/review             # manual UI pass
-cp -r example /tmp/ex && tex-review review /tmp/ex/review
-# accept a few (incl. s002+s003: same line), apply, inspect paper.tex,
-# confirm example pass files are byte-identical and .bak exists
 ```
 
-There is no automated test suite yet (planned — see PLAN.md); do the
-manual pass above after touching the apply engine or matching logic.
+The pytest suite (`tests/`) covers matching, dedupe, overrides,
+manual suggestions, replies, apply invariants, single-file mode, and
+the HTTP API — extend it with any new behavior. Browser-only behavior
+(doc pane, ruler, dialogs) still needs a manual pass:
+
+```
+tex-review review example/review             # manual UI pass
+cp -r example /tmp/ex && tex-review review /tmp/ex/review
+# accept a few (incl. s002+s003: same line), apply, inspect paper.tex
+```

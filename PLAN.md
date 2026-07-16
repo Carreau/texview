@@ -4,7 +4,13 @@ Roadmap for turning tex-review from a working script into an
 installable, tested tool. Rough priority order; each phase is
 independently shippable.
 
-## Phase 1 — Test suite (before any restructuring)
+## Phase 1 — Test suite — DONE
+
+`tests/` (pytest, dev-only extra `pip install -e ".[test]"`) covers
+everything below; 60+ tests. Keep it green and extend with new
+behavior.
+
+## Phase 1 (original scope, all covered)
 
 Pytest covering the current behavior, so packaging/refactors can't
 silently break invariants:
@@ -36,22 +42,30 @@ loads via `importlib.resources`; local MathJax is looked up in
 `./mathjax/` under the working directory; `--open` launches a browser;
 `review.py` remains as a checkout shim.
 
-Remaining:
+Also done since: MIT `LICENSE`, version 0.2.0, `tex-review` confirmed
+free on PyPI, `.github/workflows/ci.yml` (pytest on 3.9–3.13 + check
+smoke test) and `publish.yml` (trusted publishing on `v*` tags).
 
-- Check name availability on PyPI (`tex-review` / `texreview`), add a
-  LICENSE, and publish (`flit publish`).
-- CI: run pytest on 3.9–3.13, plus `tex-review check example/review`
-  as a smoke test.
+Remaining (manual, one-time): register the trusted publisher on
+pypi.org (project `tex-review` -> Publishing -> this repo,
+`publish.yml`, environment `pypi`), then `git tag v0.2.0 && git push
+--tags`.
 
 ## Phase 3 — Review-flow features
 
+- ~~**Revert** of an applied suggestion.~~ Done: `applied_at`
+  recorded at apply; `Store.revert` / `POST /api/revert` / `↶ Revert`
+  on applied cards; status returns to pending.
 - ~~**Inline editing of `new`** before accepting.~~ Done: `✎ Edit` /
   `e` edits `new`/`reasoning`/`tags` of any non-applied suggestion;
   stored as `{"status": ..., "new": ...}` dicts in `decisions.json`
   (bare-string form still read forever), in-place in single-file mode.
-- **Revert** of an applied suggestion: inverse replace while `new`
-  still matches uniquely; status back to `accepted` (or a new
-  `reverted`).
+- ~~**Purge**~~ Done: `tex-review purge` (`--dry-run`, `--status`)
+  rewrites pass files without resolved items, deletes emptied ones,
+  prunes decisions/comments.
+- ~~**Static hosting mode**~~ Done: local mode in index.html (auto-
+  detected; 📂 Open / drag-drop, in-browser engine, ⬇ Save downloads),
+  Pages deploy workflow, node-vs-Python parity tests.
 - **Occurrence disambiguation UI**: for `ambiguous` anchors, show the N
   matches in context and let the reviewer click one (stores
   `occurrence` in the decision, since pass files are read-only).

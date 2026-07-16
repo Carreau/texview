@@ -91,7 +91,8 @@ class Store:
                     dpath.read_text(encoding="utf-8")).items():
                 if isinstance(v, dict):
                     statuses[k] = v.get("status", "pending")
-                    ov = {f: v[f] for f in EDITABLE if f in v}
+                    ov = {f: v[f] for f in EDITABLE + ("applied_at",)
+                          if f in v}
                     if ov:
                         self.overrides[k] = ov
                 else:
@@ -135,7 +136,8 @@ class Store:
             ov = self.overrides.get(s["key"])
             if ov:
                 s.update(ov)
-                s["edited"] = True
+                if any(f in ov for f in EDITABLE):
+                    s["edited"] = True
         # thread replies: pass-file "replies" (to = id or content key)
         # + tool-owned comments.json (keyed by content key)
         cpath = self.path / COMMENTS
@@ -197,6 +199,10 @@ class Store:
                 live = self.suggestion_by_key(content_key(s))
                 if live:
                     s["status"] = live["status"]
+                    if "applied_at" in live:
+                        s["applied_at"] = live["applied_at"]
+                    else:
+                        s.pop("applied_at", None)
             self._write(self.path, self.single_doc)
 
     # -- manual suggestions (human-created, via the UI) ---------------
@@ -289,6 +295,119 @@ class Store:
             self._write(self.path, self.single_doc)
         self.reload()
         return self.suggestion(sid)
+
+    def purge(self, statuses=("applied", "rejected"),
+              dry_run: bool = False) -> dict:
+        """Remove resolved suggestions from disk to cut churn/repo size.
+
+        The ONE deliberate exception to "pass files are read-only":
+        explicitly human-invoked (CLI `tex-review purge`), it rewrites
+        pass files without the purged items, deletes files left empty,
+        and prunes decisions.json / comments.json of the dead keys.
+        Replies targeting a purged suggestion are dropped as well.
+        Purged applied items lose `applied_at` (no revert afterwards).
+        """
+        statuses = set(statuses)
+        doomed_keys = {s["key"] for s in self.suggestions
+                       if s["status"] in statuses}
+        doomed_ids = {s["id"] for s in self.suggestions
+                      if s["key"] in doomed_keys}
+        report = {"removed": sorted(doomed_ids),
+                  "rewritten": [], "deleted": []}
+        if not doomed_keys or dry_run:
+            return report
+        doomed = doomed_keys | doomed_ids
+        if self.dir_mode:
+            for f in sorted(self.path.glob("*.json")):
+                if f.name in (DECISIONS, COMMENTS) \
+                        or f.name.endswith(".tmp"):
+                    continue
+                try:
+                    raw = json.loads(f.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                is_list = isinstance(raw, list)
+                items = raw if is_list else raw.get("suggestions", [])
+                kept = [s for s in items
+                        if content_key(s) not in doomed_keys]
+                changed = len(kept) != len(items)
+                reps = None if is_list else raw.get("replies")
+                if reps is not None:
+                    reps_kept = [r for r in reps
+                                 if r.get("to") not in doomed]
+                    changed |= len(reps_kept) != len(reps)
+                    reps = reps_kept
+                if not changed:
+                    continue
+                if not kept and not reps:
+                    f.unlink()
+                    report["deleted"].append(f.name)
+                    continue
+                if is_list:
+                    self._write(f, kept)
+                else:
+                    raw["suggestions"] = kept
+                    if "replies" in raw:
+                        if reps:
+                            raw["replies"] = reps
+                        else:
+                            del raw["replies"]
+                    self._write(f, raw)
+                report["rewritten"].append(f.name)
+            for name in (DECISIONS, COMMENTS):
+                p = self.path / name
+                if p.is_file():
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    d2 = {k: v for k, v in d.items()
+                          if k not in doomed_keys}
+                    if d2 != d:
+                        self._write(p, d2)
+        else:
+            items = self.single_doc.get("suggestions", [])
+            self.single_doc["suggestions"] = [
+                s for s in items if content_key(s) not in doomed_keys]
+            self._write(self.path, self.single_doc)
+        self.reload()
+        return report
+
+    def revert(self, sid: str):
+        """Undo an applied suggestion: inverse replace (`new` -> `old`)
+        while the applied text can still be located. Status returns to
+        pending. Returns True, an error-reason string, or None if the
+        suggestion is unknown or not applied."""
+        s = self.suggestion(sid)
+        if s is None or s["status"] != "applied":
+            return None
+        old, new = s.get("old", ""), s.get("new", "")
+        if not new:
+            return "deleted-text"    # nothing left to anchor the undo on
+        text = self.file_text(s)
+        if text is None:
+            return "bad-file"
+        at = s.get("applied_at")
+        if isinstance(at, int) and text[at:at + len(new)] == new:
+            pos = at
+        else:
+            hits = find_occurrences(text, new)
+            if not hits:
+                return "missing"
+            if len(hits) > 1:
+                return "ambiguous"
+            pos = hits[0]
+        path = (s["_base"] / s.get("file", "")).resolve()
+        path.write_text(text[:pos] + old + text[pos + len(new):],
+                        encoding="utf-8")
+        s["status"] = "pending"
+        s.pop("applied_at", None)
+        if self.dir_mode:
+            ov = self.overrides.get(s["key"])
+            if ov:
+                ov.pop("applied_at", None)
+                if not ov:
+                    del self.overrides[s["key"]]
+        self.save()
+        self.reload()
+        return True
 
     def edit_reply(self, sid: str, ci: int, text: str):
         """Edit (or, with empty text, delete) a human reply. `ci` is
@@ -457,6 +576,7 @@ def apply_accepted(store: Store) -> dict:
         bak = path.with_name(path.name + ".bak")
         if not bak.exists():
             shutil.copy2(path, bak)
+        done = []                              # (row, original offset)
         # right-to-left so earlier offsets stay valid
         for r in sorted(group, key=lambda r: -r["match"]["start"]):
             a, b = r["match"]["start"], r["match"]["end"]
@@ -465,7 +585,18 @@ def apply_accepted(store: Store) -> dict:
                 continue
             text = text[:a] + r.get("new", "") + text[b:]
             applied.append(r["id"])
+            done.append((r, a))
         path.write_text(text, encoding="utf-8")
+        # where each replacement sits in the *final* text (for revert):
+        # its own offset shifted by the length deltas of edits before it
+        for r, a in done:
+            delta = sum(len(x.get("new", "")) - len(x["old"])
+                        for x, xa in done if xa < a)
+            s = store.suggestion(r["id"])
+            s["applied_at"] = a + delta
+            if store.dir_mode:
+                store.overrides.setdefault(
+                    s["key"], {})["applied_at"] = a + delta
 
     for sid in applied:
         store.suggestion(sid)["status"] = "applied"
