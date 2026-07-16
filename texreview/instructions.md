@@ -57,8 +57,8 @@ Fields per suggestion:
 | `old`        | yes      | the exact text to replace, copied **verbatim** from the file — every character, including whitespace, line breaks, `%` comments, and LaTeX markup |
 | `new`        | yes      | the replacement text; `""` deletes the anchored text            |
 | `occurrence` | no       | 1-based index, required if `old` appears more than once in the file |
-| `reasoning`  | no       | one sentence explaining the change; shown to the reviewer, may contain math as `$...$` |
-| `tags`       | no       | short labels such as `grammar`, `clarity`, `typo`, `notation`  |
+| `reasoning`  | no       | one sentence explaining the change; shown to the reviewer, rendered with MathJax — write math as `$...$` |
+| `tags`       | no       | list of short labels such as `grammar`, `clarity`, `typo`, `notation`; several tags per suggestion are encouraged |
 | `id`         | no       | short unique id within the file, e.g. `s001`, `s002`, …        |
 
 ## Rules for good suggestions
@@ -77,7 +77,18 @@ Fields per suggestion:
 5. **Preserve LaTeX validity.** `new` must compile in place of `old`:
    keep braces balanced, don't break environments or math delimiters.
 6. **Give a one-sentence `reasoning` and at least one tag** for every
-   suggestion.
+   suggestion — several tags are welcome (`tags` is a list). Combine
+   a broad category (`typo`, `grammar`, `notation`, `clarity`) with a
+   **specific pattern tag when you notice the same issue repeatedly**:
+   e.g. if the manuscript often has a space before a question mark,
+   tag every such suggestion `space-before-question-mark` (the exact
+   same string each time, kebab-case, also across separate passes).
+   The reviewer can then filter by that tag and accept or reject the
+   whole family at once. The reviewer sees `reasoning` (and replies) typeset
+   with MathJax, so put any mathematics between `$...$` (or
+   `\(...\)`, `$$...$$` for display math) exactly as you would in
+   LaTeX — e.g. write `$O(n \log n)$`, not "O(n log n)" or Unicode
+   approximations.
 7. **Don't re-suggest** something already present in an earlier pass
    file, and don't suggest edits to text you yourself proposed in
    `new` — suggestions anchor to the file as it is on disk now.

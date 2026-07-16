@@ -126,8 +126,10 @@ Schema. The same text lives in
 > verbatim from the file and should be long enough to be unique — extend
 > it with surrounding words if needed, or set `occurrence`. Keep
 > suggestions independent: two suggestions must not overlap in the text
-> they touch. Give a one-sentence `reasoning` for each, and a short tag
-> such as grammar, clarity, typo, or notation. Run
+> they touch. Give a one-sentence `reasoning` for each, and tags: a
+> broad category (grammar, clarity, typo, notation) plus a stable
+> pattern tag (e.g. `space-before-question-mark`) when the same issue
+> recurs, so it can be filtered and handled in bulk. Run
 > `tex-review check review/` and fix any anchor it flags before
 > finishing.
 
@@ -145,26 +147,61 @@ them, and they stay `accepted` so you can fix and re-apply.
 
 ## PDF panel (SyncTeX)
 
-If a compiled `paper.pdf` sits next to `paper.tex`, the **📄 PDF**
-toggle (or `P`) opens a third panel showing the PDF, and it follows
-your selection: each suggestion is forward-searched with SyncTeX and
-the viewer jumps to the right page. Requirements: compile with
+The **📄 PDF** toggle (or `P`) opens a third panel showing the
+compiled PDF, and it follows your selection: each suggestion is
+forward-searched with SyncTeX and the viewer jumps to the exact spot.
+The PDF is found automatically — `<file>.pdf` next to the reviewed
+file, or the single PDF under the manuscript root. For `\input`/
+`\include` setups with several PDFs around, a dropdown in the panel
+header lets you pick the root document's PDF (remembered). Requirements: compile with
 `-synctex=1` (so `paper.synctex.gz` exists) and have the `synctex`
 CLI on the PATH (ships with TeX Live/MacTeX).
 
 Prefer your own PDF reader? Start the server with a forward-search
 command template and the selection will drive it instead of the
-in-page panel (placeholders: `{line}`, `{tex}`, `{pdf}`):
+in-page panel. Placeholders: `{line}`, `{tex}` (absolute source
+path), `{pdf}` (absolute PDF path). Recipes for common readers:
 
 ```
+# Zathura (Linux)
 tex-review review review/ --pdf-viewer "zathura --synctex-forward {line}:1:{tex} {pdf}"
+
+# Okular (KDE) — reuses one window thanks to --unique
 tex-review review review/ --pdf-viewer "okular --unique {pdf}#src:{line} {tex}"
-tex-review review review/ --pdf-viewer "displayline {line} {pdf} {tex}"   # Skim (macOS)
+
+# qpdfview (Linux)
+tex-review review review/ --pdf-viewer "qpdfview --unique {pdf}#src:{tex}:{line}:1"
+
+# Skim (macOS; displayline ships in Skim.app)
+tex-review review review/ --pdf-viewer "/Applications/Skim.app/Contents/SharedSupport/displayline -g {line} {pdf} {tex}"
+
+# SumatraPDF (Windows)
+tex-review review review/ --pdf-viewer "SumatraPDF -reuse-instance -forward-search {tex} {line} {pdf}"
+
+# Evince (GNOME) has no forward-search CLI; use a SyncTeX helper such
+# as `evince_forward_search` (shipped with several editors) the same
+# way: "evince_forward_search {pdf} {line} {tex}"
 ```
 
-The in-page panel uses the browser's built-in PDF viewer at page
-granularity; external viewers give smooth, exact positioning. PDF
-sync needs the server (it is not available in static/local mode).
+The command is run on every selection change (debounced), so pick a
+reader that reuses its window (`--unique`, `-reuse-instance`, …).
+
+If sync misbehaves, `tex-review review --debug` logs every request
+and synctex invocation to stderr.
+
+The in-page panel renders with PDF.js and scrolls to the exact
+SyncTeX position, marking it with a highlight bar. PDF.js (and
+MathJax) are bundled inside the package and served locally, so this
+works offline out of the box; a copy in a `./pdfjs/` or `./mathjax/`
+directory under the working directory overrides the bundled one, and
+the CDN is only used as a last resort (e.g. the static page). If
+PDF.js is unavailable the panel degrades to the browser's built-in
+viewer at page granularity. PDF sync needs the server (it is not
+available in static/local mode).
+
+The document and PDF panels can be rearranged: the ◀ ▶ buttons in
+each panel header move it among the three columns, and the layout is
+remembered.
 
 ## No-install / static mode
 
@@ -231,14 +268,8 @@ turns previews on/off. The diff block itself always shows verbatim
 source — that is the exact text that gets applied, so it is never
 typeset.
 
-MathJax loads from the jsDelivr CDN by default. For fully offline use,
-drop a local copy in a `mathjax/` directory under the working directory
-you run `tex-review` from, and it is picked up automatically:
-
-```
-curl --create-dirs -o mathjax/es5/tex-svg.js \
-  https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js
-```
-
-If neither is reachable, everything still works — math just stays as
+MathJax is bundled with the package and served locally (a copy in a
+`./mathjax/` directory under the working directory takes precedence;
+the jsDelivr CDN is the fallback for the statically hosted page). If
+nothing is reachable, everything still works — math just stays as
 source text.

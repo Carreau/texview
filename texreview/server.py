@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import mimetypes
 import shlex
 import shutil
@@ -22,27 +23,63 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def synctex_page(tex: Path, line: int, pdf: Path):
-    """Forward search via the synctex CLI: source line -> PDF page.
-    Returns None if synctex is missing, times out, or finds nothing
-    (e.g. the PDF was not compiled with -synctex=1)."""
+log = logging.getLogger("texreview")
+
+
+def _synctex_parse(stdout: str):
+    page = x = y = None
+    for ln in stdout.splitlines():       # first result block wins
+        try:
+            if page is None and ln.startswith("Page:"):
+                page = int(ln.split(":", 1)[1])
+            elif page is not None and x is None and ln.startswith("x:"):
+                x = float(ln.split(":", 1)[1])
+            elif page is not None and y is None and ln.startswith("y:"):
+                y = float(ln.split(":", 1)[1])
+        except ValueError:
+            return None
+        if page is not None and x is not None and y is not None:
+            break
+    if page is None:
+        return None
+    return {"page": page, "x": x or 0.0, "y": y or 0.0}
+
+
+def synctex_view(tex: Path, line: int, pdf: Path):
+    """Forward search via the synctex CLI: source line -> PDF position.
+    Returns {"page": int, "x": float, "y": float} (points, y from the
+    top of the page) on success, or an error-message string.
+
+    The .synctex.gz records input names as TeX saw them (often
+    "./sub/file.tex" relative to the compile directory), so the
+    absolute path may not match — retry with relative forms.
+    """
     exe = shutil.which("synctex")
     if exe is None:
-        return None
+        return "synctex CLI not found on PATH (it ships with TeX Live)"
+    names = [str(tex)]
     try:
-        out = subprocess.run(
-            [exe, "view", "-i", f"{max(1, line)}:1:{tex}",
-             "-o", str(pdf)],
-            capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    for ln in out.stdout.splitlines():
-        if ln.startswith("Page:"):
-            try:
-                return int(ln.split(":", 1)[1])
-            except ValueError:
-                return None
-    return None
+        rel = tex.relative_to(pdf.parent.resolve())
+        names += [str(rel), f"./{rel}"]
+    except ValueError:
+        pass
+    for name in names:
+        cmd = [exe, "view", "-i", f"{max(1, line)}:1:{name}",
+               "-o", str(pdf)]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log.debug("synctex: %s -> %s", " ".join(cmd), e)
+            return f"synctex failed to run: {e}"
+        loc = _synctex_parse(out.stdout)
+        log.debug("synctex: %s -> %s (rc=%s)\nstdout: %.400s"
+                  "\nstderr: %.200s", " ".join(cmd), loc,
+                  out.returncode, out.stdout, out.stderr)
+        if loc is not None:
+            return loc
+    return (f"no synctex result for {tex.name}:{line} — was "
+            f"{pdf.name} compiled with -synctex=1?")
 
 
 def tilde(path: Path) -> str:
@@ -67,16 +104,61 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _pdf_for(self, s):
-        """(abs tex path, abs pdf path or None) for a suggestion."""
+    @staticmethod
+    def _has_synctex(p: Path) -> bool:
+        return (p.with_suffix(".synctex.gz").is_file()
+                or p.with_suffix(".synctex").is_file())
+
+    def _pdf_candidates(self, s):
+        """PDFs under the manuscript root (rel paths, capped) — the
+        reviewed file may be \\input into a root document whose PDF
+        has a different name. Ranked by likelihood of being the
+        compiled document, not path order, so a tree full of
+        figures/*.pdf cannot crowd out the root PDF: sibling
+        .synctex.gz first, then sibling .tex, then shallower paths."""
+        base = s["_base"]
+        scored = []
+        for p in base.rglob("*.pdf"):
+            rp = p.relative_to(base)
+            if any(part.startswith(".") for part in rp.parts):
+                continue
+            scored.append((not self._has_synctex(p),
+                           not p.with_suffix(".tex").is_file(),
+                           len(rp.parts), str(rp)))
+        scored.sort()
+        return [rp for *_, rp in scored[:20]]
+
+    def _pdf_for(self, s, choice=None):
+        """(abs tex path, abs pdf path or None) for a suggestion.
+        `choice` is a client-selected rel path; otherwise prefer
+        <stem>.pdf next to the tex file, else a single unambiguous
+        PDF anywhere under the root."""
         base = s["_base"]
         tex = (base / s.get("file", "")).resolve()
+        if choice:
+            p = (base / choice).resolve()
+            if str(p).startswith(str(base)) and p.suffix == ".pdf" \
+                    and p.is_file():
+                return tex, p
+            return tex, None
         pdf = tex.with_suffix(".pdf")
         if str(pdf).startswith(str(base)) and pdf.is_file():
             return tex, pdf
+        cands = self._pdf_candidates(s)
+        if len(cands) == 1:
+            return tex, (base / cands[0]).resolve()
+        # several PDFs (figures etc.): a unique one with synctex data
+        # is unambiguously the compiled document
+        synced = [c for c in cands
+                  if self._has_synctex((base / c).resolve())]
+        if len(synced) == 1:
+            return tex, (base / synced[0]).resolve()
         return tex, None
 
     def _json(self, obj, code: int = 200) -> None:
+        if code >= 400:
+            log.debug("%s %s -> %s %s", self.command, self.path, code,
+                      obj)
         self._send(code, json.dumps(obj).encode(), "application/json")
 
     def do_GET(self):
@@ -84,16 +166,27 @@ class Handler(BaseHTTPRequestHandler):
             page = files("texreview").joinpath(
                 "static/index.html").read_bytes()
             self._send(200, page, "text/html; charset=utf-8")
-        elif self.path.startswith("/mathjax/"):
-            # optional local MathJax: ./mathjax/ in the working directory
-            root = (Path.cwd() / "mathjax").resolve()
-            rel = self.path[len("/mathjax/"):].split("?", 1)[0]
+        elif self.path.startswith(("/mathjax/", "/pdfjs/")):
+            # vendored assets: a copy in the working directory wins,
+            # then whatever ships inside the package (PDF.js does);
+            # 404 lets the page fall back to the CDN (MathJax)
+            prefix = self.path.split("/", 2)[1]
+            rel = self.path[len(prefix) + 2:].split("?", 1)[0]
+            root = (Path.cwd() / prefix).resolve()
             p = (root / rel).resolve()
+            body = None
             if str(p).startswith(str(root)) and p.is_file():
-                ctype = (mimetypes.guess_type(p.name)[0]
+                body = p.read_bytes()
+            elif ".." not in rel.split("/"):
+                res = files("texreview").joinpath(
+                    f"static/{prefix}/{rel}")
+                if res.is_file():
+                    body = res.read_bytes()
+            if body is not None:
+                ctype = (mimetypes.guess_type(rel)[0]
                          or "application/octet-stream")
-                self._send(200, p.read_bytes(), ctype)
-            else:  # no local copy: index.html falls back to the CDN
+                self._send(200, body, ctype, cache="max-age=3600")
+            else:
                 self._send(404, b"not found", "text/plain")
         elif urlparse(self.path).path == "/api/file":
             # full text of the file a suggestion points at; resolved via
@@ -111,12 +204,13 @@ class Handler(BaseHTTPRequestHandler):
         elif urlparse(self.path).path == "/api/pdf":
             # the compiled PDF next to a suggestion's tex file;
             # cacheable so page jumps don't refetch it
-            sid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            q = parse_qs(urlparse(self.path).query)
+            sid = q.get("id", [""])[0]
             with self.store.lock:
                 s = self.store.suggestion(sid)
                 if s is None:
                     return self._json({"error": "unknown id"}, 404)
-                _, pdf = self._pdf_for(s)
+                _, pdf = self._pdf_for(s, q.get("pdf", [None])[0])
             if pdf is None:
                 return self._json({"error": "no PDF"}, 404)
             self._send(200, pdf.read_bytes(), "application/pdf",
@@ -249,12 +343,17 @@ class Handler(BaseHTTPRequestHandler):
                         and isinstance(s.get("applied_at"), int):
                     line = text.count("\n", 0, s["applied_at"]) + 1
                 line = line or 1
-                tex, pdf = self._pdf_for(s)
+                choice = body.get("pdf") or None
+                tex, pdf = self._pdf_for(s, choice)
+                cands = self._pdf_candidates(s)
                 sid = s["id"]
             if pdf is None:
-                return self._json(
-                    {"error": f"no PDF next to {s.get('file', '?')} — "
-                              "compile it first"}, 404)
+                msg = ("pick a PDF (the reviewed file may be \\input "
+                       "into a root document)" if cands
+                       else f"no PDF found for {s.get('file', '?')} — "
+                            "compile it first")
+                return self._json({"error": msg, "pdfs": cands}, 404)
+            rel = str(pdf.relative_to(s["_base"]))
             if self.pdf_viewer:
                 cmd = [t.format(line=line, tex=str(tex), pdf=str(pdf))
                        for t in shlex.split(self.pdf_viewer)]
@@ -263,16 +362,17 @@ class Handler(BaseHTTPRequestHandler):
                                      stderr=subprocess.DEVNULL)
                 except OSError as e:
                     return self._json({"error": f"viewer: {e}"}, 500)
-                return self._json({"mode": "viewer", "line": line})
-            page = synctex_page(tex, line, pdf)
-            if page is None:
-                return self._json(
-                    {"error": "synctex lookup failed — is the synctex "
-                              "CLI installed and the PDF compiled with "
-                              "-synctex=1?"}, 409)
-            return self._json({"mode": "page", "page": page,
-                               "line": line,
-                               "url": f"/api/pdf?id={quote(sid)}"})
+                return self._json({"mode": "viewer", "line": line,
+                                   "pdf": rel, "pdfs": cands})
+            loc = synctex_view(tex, line, pdf)
+            if isinstance(loc, str):
+                return self._json({"error": loc, "pdfs": cands,
+                                   "pdf": rel}, 409)
+            return self._json({"mode": "page", "line": line,
+                               "url": f"/api/pdf?id={quote(sid)}"
+                                      f"&pdf={quote(rel)}",
+                               "pdf": rel, "pdfs": cands,
+                               "pdfkey": str(pdf), **loc})
 
         if self.path == "/api/purge":
             sts = body.get("statuses") or ["applied", "rejected"]
@@ -301,14 +401,21 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send(404, b"not found", "text/plain")
 
-    def log_message(self, fmt, *args):  # quieter console
-        pass
+    def log_message(self, fmt, *args):  # quiet unless --debug
+        log.debug("%s - %s", self.address_string(), fmt % args)
 
 
 def serve(store: Store, port: int = 8123, open_browser: bool = False,
-          pdf_viewer: str = None) -> None:
+          pdf_viewer: str = None, debug: bool = False) -> None:
     Handler.store = store
     Handler.pdf_viewer = pdf_viewer
+    if debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s.%(msecs)03d %(message)s",
+            datefmt="%H:%M:%S")
+        logging.getLogger("texreview").setLevel(logging.DEBUG)
+        log.debug("debug logging enabled")
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}"
     print(f"reviewing {tilde(store.path)}  →  {url}")

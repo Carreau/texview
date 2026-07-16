@@ -28,7 +28,6 @@ def test_index_and_404(basic_review, make_client):
     code, body = c.get("/")
     assert code == 200 and b"<!doctype html>" in body[:20]
     assert c.get("/nope")[0] == 404
-    assert c.get("/mathjax/es5/tex-svg.js")[0] == 404   # no local copy
 
 
 def test_mathjax_traversal_guard(basic_review, make_client):

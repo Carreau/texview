@@ -38,7 +38,7 @@ def cmd_review(args) -> int:
     if store is None:
         return 1
     serve(store, port=args.port, open_browser=args.open,
-          pdf_viewer=args.pdf_viewer)
+          pdf_viewer=args.pdf_viewer, debug=args.debug)
     return 0
 
 
@@ -117,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8123)
     p.add_argument("--open", action="store_true",
                    help="open the UI in a browser")
+    p.add_argument("--debug", action="store_true",
+                   help="log requests, API errors and synctex "
+                        "invocations to stderr")
     p.add_argument(
         "--pdf-viewer", metavar="TEMPLATE",
         help="synctex forward-search command run when the PDF panel "

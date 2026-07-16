@@ -39,7 +39,14 @@ Installable package (flit, `pyproject.toml`, console script
 
 - **Stdlib only.** No pip dependencies; the tool must run anywhere
   Python (3.9+) runs.
-- **Single-file UI**, vanilla JS, no build step.
+- **Single-file UI**, vanilla JS, no build step. Browser libraries
+  (MathJax, PDF.js) are vendored in the package
+  (`texreview/static/{mathjax,pdfjs}/`) and served from `/mathjax/`,
+  `/pdfjs/` — a working-directory copy overrides, the CDN is the
+  last-resort fallback (used by the statically hosted page), and the
+  UI degrades gracefully if none load. PDF.js must stay same-origin:
+  browsers reject cross-origin workers (the CDN path fetches the
+  worker and feeds it in as a blob URL).
 - Server binds localhost only.
 - Single-file mode (`suggestions.json`) must keep working.
 - Agent pass files (`review/NNNN-*.json`) are strictly read-only to
@@ -147,8 +154,23 @@ or decisions semantics, change BOTH implementations.
 - `GET /api/pdf?id=<sid>` → the compiled PDF next to the suggestion's
   tex file (`<stem>.pdf`, containment-guarded; `Cache-Control:
   max-age=300` so page jumps don't refetch).
-- `POST /api/sync {id}` → synctex forward search for the suggestion's
-  current line (falls back to `applied_at` for applied ones). With
+- `POST /api/sync {id, pdf?}` → synctex forward search for the
+  suggestion's current line (falls back to `applied_at` for applied
+  ones). PDF resolution: explicit `pdf` (rel path, containment
+  checked) > `<stem>.pdf` next to the tex file > a single PDF found
+  under the root (`_pdf_candidates`, capped rglob skipping dotdirs) —
+  handles `\input`/`\include` where only the root document has a PDF.
+  Candidates are ranked (sibling `.synctex.gz` > sibling `.tex` >
+  shallower path) and a unique synctex-bearing PDF is auto-picked, so
+  `figures/*.pdf` never crowd out the root document. Responses carry
+  `pdf` (chosen) + `pdfs` (candidates) for the pane's dropdown;
+  ambiguous/no PDF → 404 with `pdfs`. `synctex_view` retries with
+  path forms relative to the PDF's directory (synctex records inputs
+  as TeX saw them) and returns an error *string* on failure — check
+  `isinstance(loc, str)`.
+- `--debug` (review subcommand) → `logging` logger `texreview`:
+  request lines, ≥400 API responses, and every synctex invocation
+  with its parsed result/stdout. With
   `--pdf-viewer TEMPLATE` (placeholders `{line} {tex} {pdf}`,
   shlex-split then formatted per token) it spawns the external viewer
   and returns `{mode: "viewer"}`; otherwise runs the `synctex` CLI and
@@ -175,17 +197,39 @@ or decisions semantics, change BOTH implementations.
   and full shortcut table; Esc/backdrop-click closes it, and other
   shortcuts are ignored while it is open.
   Filters:
-  all/pending/accepted/rejected, plus tag chips in the toolbar (click
-  to filter by tag, click again to clear; card tag chips work too) and
+  all/pending/accepted/rejected(+applied — that tab appears only when
+  something is applied); counts live in the tab labels ("Pending (5)"),
+  set by render(), which owns the filter tabs' on-state (the click
+  handler only matches `.tab[data-f]` — don't widen it, other toolbar
+  buttons share the .tab class). Plus tag chips in the toolbar (click
+  to filter by tag, click again to clear; card tag chips work too;
+  `✓/✕ shown` buttons appear when a filter narrows the list and
+  bulk-decide the visible pending items — the counterpart of the
+  pattern tags `instruct` asks agents to emit for recurring issues) and
   a per-file `<select>` (keyed by `fkey`, hidden when only one file
   has suggestions; choosing a file moves the selection — and the doc
   pane — into it). Status ∩ tag ∩ file all combine.
 - PDF pane (`📄 PDF` / `P`, persisted as `texreview.pdf`, hidden in
-  local mode and under 1100px): iframe on the browser's built-in PDF
-  viewer via `/api/pdf?id=...&v=<page>#page=<page>` (the `v` param
-  forces a real navigation on page change; caching keeps it cheap).
-  Selection changes call `/api/sync` debounced 250 ms; in
-  `--pdf-viewer` mode the pane just reports "→ external viewer".
+  local mode and under 1100px): PDF.js (served from the package via
+  `/pdfjs/`, then CDN) renders a scrollable stack — one `.pdfpage`
+  placeholder per page, lazily rendered via IntersectionObserver
+  (60% rootMargin), far pages evicted past 16 rendered, page
+  indicator in the header, rebuilt on resize. Sync scrolls to the
+  target page's offset + exact synctex y (points from page top ×
+  scale) with the `#pdfmark` highlight bar; the document is cached
+  per `pdfkey` and renders are sequence-guarded. If PDF.js
+  fails to load, degrades to the built-in viewer iframe via
+  `/api/pdf?id=...&v=<page>#page=<page>`. Selection changes call
+  `/api/sync` debounced 250 ms; in `--pdf-viewer` mode the pane just
+  reports "→ external viewer".
+- `▤ notes` toolbar toggle (persisted `texreview.notes`): moves the
+  reviewer note below the diff (`body.noteunder` collapses the card
+  grid to one column) instead of the margin column.
+- Panel order: `ORDER` (`texreview.panels`, e.g.
+  `["doc","main","pdf"]`) maps to flex `order`; the ◀ ▶ `.mv` buttons
+  in the doc/PDF pane headers move that pane among the three columns
+  (any permutation reachable). Migrates the old `texreview.docside`
+  setting.
 - Live auto-refresh: a 3 s `pollState` interval refetches
   `/api/state`, compares a cheap signature (key/status/replies/edited/
   new), and re-renders only on change (toast for new suggestions).
@@ -238,7 +282,11 @@ tex-review check example/review              # anchors resolve
 
 The pytest suite (`tests/`) covers matching, dedupe, overrides,
 manual suggestions, replies, apply invariants, single-file mode, and
-the HTTP API — extend it with any new behavior. Browser-only behavior
+the HTTP API — extend it with any new behavior.
+`tests/test_ui_browser.py` drives the real UI (incl. PDF.js
+rendering) headlessly; it auto-skips unless playwright + chromium +
+pdflatex are present (`pip install playwright && playwright install
+chromium`). Browser-only behavior
 (doc pane, ruler, dialogs) still needs a manual pass:
 
 ```

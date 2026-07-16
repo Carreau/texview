@@ -10,6 +10,15 @@ window.MathJax = {
     inlineMath: [["$", "$"], ["\\(", "\\)"]],
     displayMath: [["$$", "$$"], ["\\[", "\\]"]],
     processEscapes: true,
+    // snippets are typeset out of context, so cross-references can
+    // never resolve (they'd show as "(???)"): render the key itself
+    // and drop \label entirely
+    macros: {
+      label: ["", 1],
+      ref: ["{\\small\\text{#1}}", 1],
+      eqref: ["{\\small\\text{(#1)}}", 1],
+      pageref: ["{\\small\\text{#1}}", 1],
+    },
   },
   svg: { scale: 0.94 },
   startup: {
@@ -60,13 +69,9 @@ window.MathJax = {
   #source { font: 12px var(--mono); color: #9aa0a6;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
             flex: 1; min-width: 0; }
-  .meter { display: flex; height: 8px; width: 180px; border-radius: 4px;
-           overflow: hidden; background: #3a3f45; flex: none; }
-  .meter i { display: block; height: 100%; }
-  .meter .A { background: var(--ok); }
-  .meter .R { background: var(--no); }
-  .meter .D { background: #8aa4d6; }
-  #counts { font: 12px var(--mono); color: #cfd3d8; flex: none; }
+  #filters { display: flex; gap: 4px; flex: none; align-items: baseline; }
+  header .tab { color: #9aa0a6; }
+  header .tab.on { color: #fff; border-bottom-color: #8aa4d6; }
   #applyBtn {
     flex: none; background: var(--pencil); color: #fff; border: 0;
     border-radius: 6px; padding: 7px 14px; font: 600 13px var(--sans);
@@ -254,7 +259,12 @@ window.MathJax = {
   }
   #docmid { flex: 1; min-height: 0; display: flex; }
   #docbody { flex: 1; min-width: 0; overflow: auto; }
-  body.docleft #docpane { order: -1; }   /* pane on the left */
+  #pdfmsg { flex: 1; min-width: 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+  #pdfSel { font: 11px var(--mono); color: var(--ink);
+            background: var(--paper); border: 1px solid var(--rule);
+            border-radius: 4px; padding: 2px 4px; max-width: 12em;
+            flex: none; cursor: pointer; }
   #dochdr, #pdfhdr { flex: none;
             background: var(--paper); border-bottom: 1px solid var(--rule);
             font: 12px var(--mono); color: var(--faint);
@@ -281,6 +291,19 @@ window.MathJax = {
     max-width: 2200px;
   }
   #pdfframe { flex: 1; width: 100%; border: 0; background: #f1efe8; }
+  #pdfbody { flex: 1; overflow: auto; background: #e3e0d8;
+             padding: 10px 0; }
+  #pdfbody[hidden] { display: none; }
+  #pdfstack { position: relative; }
+  .pdfpage { position: relative; margin: 0 auto 10px; background: #fff;
+             box-shadow: 0 1px 4px rgba(31, 35, 40, .22); }
+  .pdfpage canvas { display: block; }
+  #pdfmark { position: absolute; left: 0; right: 0; height: 20px;
+             background: rgba(45, 79, 143, .12);
+             border-top: 2px solid rgba(45, 79, 143, .55);
+             pointer-events: none; }
+  #pdfpageno { font: 11px var(--mono); color: var(--faint);
+               flex: none; }
   #pdfBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
   @media (max-width: 1100px) {
     body.pdfview #cols { display: contents; }
@@ -352,11 +375,18 @@ window.MathJax = {
   #empty { text-align: center; color: var(--faint); padding: 60px 0;
            font: italic 15px var(--serif); }
 
+  /* notes below the diff instead of in the margin (▤ notes toggle) */
+  body.noteunder .card { grid-template-columns: minmax(0, 1fr); }
+  body.noteunder .note { border-left: 0;
+                         border-top: 1px dotted #b9b3a4;
+                         padding: 10px 0 0; }
+  #noteBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
+
   @media (max-width: 760px) {
     .card { grid-template-columns: 1fr; }
     .note { border-left: 0; border-top: 1px dotted #b9b3a4;
             padding: 10px 0 0; }
-    .meter { display: none; }
+    #source { display: none; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .card { transition: border-color .12s, box-shadow .12s, opacity .2s; }
@@ -368,10 +398,13 @@ window.MathJax = {
 <header>
   <h1>tex<span>·</span>review</h1>
   <div id="source"></div>
-  <div class="meter" aria-hidden="true">
-    <i class="A"></i><i class="R"></i><i class="D"></i>
-  </div>
-  <div id="counts"></div>
+  <span id="filters">
+    <button class="tab on" data-f="all">All</button>
+    <button class="tab" data-f="pending">Pending</button>
+    <button class="tab" data-f="accepted">Accepted</button>
+    <button class="tab" data-f="rejected">Rejected</button>
+    <button class="tab" data-f="applied" hidden>Applied</button>
+  </span>
   <button id="applyBtn">Apply accepted<kbd>A</kbd></button>
 </header>
 
@@ -383,15 +416,16 @@ window.MathJax = {
             title="download edited files, decisions and comments">⬇&nbsp;Save</button>
     <input id="fileIn" type="file" multiple hidden>
   </span>
-  <button class="tab on" data-f="all">All</button>
-  <button class="tab" data-f="pending">Pending</button>
-  <button class="tab" data-f="accepted">Accepted</button>
-  <button class="tab" data-f="rejected">Rejected</button>
   <select id="fileSel" title="filter by file"></select>
   <span id="tagbar" title="filter by tag"></span>
+  <button class="tab" id="accShown" hidden
+          title="accept every pending suggestion in the current filter">✓&nbsp;shown</button>
+  <button class="tab" id="rejShown" hidden
+          title="reject every pending suggestion in the current filter">✕&nbsp;shown</button>
   <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX<kbd>m</kbd></button>
   <button class="tab" id="docBtn" title="show the full document beside the list">⧉&nbsp;Doc<kbd>d</kbd></button>
   <button class="tab" id="pdfBtn" title="show the compiled PDF, synced to the selection via synctex">📄&nbsp;PDF<kbd>P</kbd></button>
+  <button class="tab" id="noteBtn" title="place the reviewer note below the diff instead of beside it">▤&nbsp;notes</button>
   <label class="ctxctl" title="context lines shown around each change">
     ±<input id="ctx" type="number" min="0" max="99" step="1"> lines<kbd>+/−</kbd>
   </label>
@@ -411,7 +445,10 @@ window.MathJax = {
     <button id="addBtn" class="dbtn" disabled
             title="create a suggestion from the selected text">＋ suggest</button>
     <button id="wrapBtn" class="dbtn" title="toggle line wrapping">wrap</button>
-    <button id="sideBtn" class="dbtn" title="move pane to the other side">⇄ side</button>
+    <button class="dbtn mv" data-pane="doc" data-dir="-1"
+            title="move this pane left">◀</button>
+    <button class="dbtn mv" data-pane="doc" data-dir="1"
+            title="move this pane right">▶</button>
   </div>
   <div id="docmid">
     <div id="docbody"><pre id="doc"></pre></div>
@@ -419,8 +456,18 @@ window.MathJax = {
   </div>
 </aside>
 <aside id="pdfpane">
-  <div id="pdfhdr"><span id="pdfmsg">PDF</span></div>
-  <iframe id="pdfframe" title="compiled PDF"></iframe>
+  <div id="pdfhdr">
+    <span id="pdfmsg">PDF</span>
+    <span id="pdfpageno"></span>
+    <select id="pdfSel" hidden
+            title="which PDF to sync against (for \input/\include setups)"></select>
+    <button class="dbtn mv" data-pane="pdf" data-dir="-1"
+            title="move this pane left">◀</button>
+    <button class="dbtn mv" data-pane="pdf" data-dir="1"
+            title="move this pane right">▶</button>
+  </div>
+  <div id="pdfbody"><div id="pdfstack"></div></div>
+  <iframe id="pdfframe" title="compiled PDF" hidden></iframe>
 </aside>
 </div>
 <div id="toast" role="status"></div>
@@ -481,9 +528,19 @@ let CTX = (() => {        // context lines around each change, persisted
   return Number.isFinite(n) ? Math.max(0, Math.min(99, n)) : 1;
 })();
 let DOCVIEW = localStorage.getItem("texreview.doc") === "1";
-let DOCLEFT = localStorage.getItem("texreview.docside") === "left";
 let PDFVIEW = localStorage.getItem("texreview.pdf") === "1";
+let NOTEUNDER = localStorage.getItem("texreview.notes") === "below";
 let PDFCUR = { url: null, page: 0 };   // what the PDF iframe shows
+// column order of the three panels; the asides move via ◀ ▶
+let ORDER = (() => {
+  try {
+    const o = JSON.parse(localStorage.getItem("texreview.panels"));
+    if (Array.isArray(o) &&
+        [...o].sort().join() === "doc,main,pdf") return o;
+  } catch (e) {}
+  return localStorage.getItem("texreview.docside") === "left"
+    ? ["doc", "main", "pdf"] : ["main", "doc", "pdf"];
+})();
 let WRAP = localStorage.getItem("texreview.wrap") !== "0";
 let DOC = { fkey: null, text: null, stale: true };  // document pane cache
 let USER = sessionStorage.getItem("texreview.user") || "";  // author override
@@ -699,13 +756,23 @@ function render() {
     : "Nothing in this filter. Every manuscript deserves a clean desk.";
   const c = { pending: 0, accepted: 0, rejected: 0, applied: 0 };
   STATE.suggestions.forEach(s => c[s.status]++);
-  const total = STATE.suggestions.length || 1;
-  $("#counts").textContent =
-    `${c.pending} pending · ${c.accepted} ✓ · ${c.rejected} ✕` +
-    (c.applied ? ` · ${c.applied} applied` : "");
-  $(".meter .A").style.width = (100 * c.accepted / total) + "%";
-  $(".meter .R").style.width = (100 * c.rejected / total) + "%";
-  $(".meter .D").style.width = (100 * c.applied / total) + "%";
+  if (!c.applied && FILTER === "applied") FILTER = "all";
+  const labels = {
+    all: `All (${STATE.suggestions.length})`,
+    pending: `Pending (${c.pending})`,
+    accepted: `Accepted (${c.accepted})`,
+    rejected: `Rejected (${c.rejected})`,
+    applied: `Applied (${c.applied})`,
+  };
+  document.querySelectorAll(".tab[data-f]").forEach(t => {
+    t.textContent = labels[t.dataset.f];
+    t.classList.toggle("on", t.dataset.f === FILTER);
+    if (t.dataset.f === "applied") t.hidden = !c.applied;
+  });
+  const narrowed = FILTER !== "all" || TAG !== null || FILE !== null;
+  const shownPending = list.filter(s => s.status === "pending").length;
+  $("#accShown").hidden = $("#rejShown").hidden =
+    !(narrowed && shownPending > 0);
   $("#applyBtn").disabled = c.accepted === 0;
   $("#source").textContent = STATE.source || "";
   $("#userIn").placeholder = STATE.user || "user";
@@ -719,10 +786,26 @@ function render() {
 }
 
 /* ---- document pane ---- */
+function applyPanelOrder() {
+  const els = { main: document.querySelector("main"),
+                doc: $("#docpane"), pdf: $("#pdfpane") };
+  ORDER.forEach((k, i) => els[k].style.order = i);
+}
+
+function movePanel(pane, dir) {
+  const i = ORDER.indexOf(pane), j = i + dir;
+  if (j < 0 || j >= ORDER.length) return;
+  [ORDER[i], ORDER[j]] = [ORDER[j], ORDER[i]];
+  localStorage.setItem("texreview.panels", JSON.stringify(ORDER));
+  applyPanelOrder();
+}
+
 function applyDocPrefs() {
   document.body.classList.toggle("docview", DOCVIEW);
-  document.body.classList.toggle("docleft", DOCLEFT);
   document.body.classList.toggle("pdfview", PDFVIEW && !LOCAL);
+  document.body.classList.toggle("noteunder", NOTEUNDER);
+  applyPanelOrder();
+  $("#noteBtn").classList.toggle("on", NOTEUNDER);
   $("#docBtn").classList.toggle("on", DOCVIEW);
   $("#pdfBtn").classList.toggle("on", PDFVIEW && !LOCAL);
   $("#doc").classList.toggle("nowrap", !WRAP);
@@ -752,25 +835,218 @@ function renderPdf() {
   pdfTimer = setTimeout(syncPdf, 250);
 }
 
+/* PDF.js, MathJax-style: local copy first, then CDN, else null and
+   the pane degrades to the browser's built-in viewer (page-level) */
+const PDFJS_CDN = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/";
+let pdfjsReady = null;
+function loadPdfjs() {
+  if (!pdfjsReady)
+    pdfjsReady = (async () => {
+      const load = base => new Promise((res, rej) => {
+        const sc = document.createElement("script");
+        sc.src = base + "pdf.min.js";
+        sc.onload = () => res(base);
+        sc.onerror = () => rej(new Error("load failed: " + sc.src));
+        document.head.appendChild(sc);
+      });
+      let base;
+      try { base = await load("/pdfjs/build/"); }
+      catch (e) {
+        try { base = await load(PDFJS_CDN); }
+        catch (e2) { console.warn("PDF.js unavailable", e2); return null; }
+      }
+      // Workers must be same-origin, so a CDN workerSrc is rejected by
+      // the browser: fetch the script (the CDN allows CORS) and hand
+      // PDF.js a same-origin blob URL instead.
+      try {
+        const t = await (await fetch(base + "pdf.worker.min.js")).text();
+        pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(
+          new Blob([t], { type: "text/javascript" }));
+      } catch (e) {
+        console.warn("PDF.js worker fetch failed, using direct URL", e);
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          base + "pdf.worker.min.js";
+      }
+      return window.pdfjsLib;
+    })();
+  return pdfjsReady;
+}
+
+/* scrollable page stack: placeholders for every page, rendered
+   lazily as they come into view, far pages evicted to save memory */
+let PDFST = { key: null, doc: null, scale: 1, h: 0, num: 0,
+              rendered: new Map(), io: null };
+let pdfSeq = 0;
+
+async function buildPdfStack(doc, key) {
+  const body = $("#pdfbody"), stack = $("#pdfstack");
+  if (!body.clientWidth)              // pane may have just been shown
+    await new Promise(requestAnimationFrame);
+  if (!body.clientWidth)
+    throw new Error("PDF pane has no width (window too narrow?)");
+  const vp1 = (await doc.getPage(1)).getViewport({ scale: 1 });
+  const scale = Math.max(1e-3, (body.clientWidth - 20) / vp1.width);
+  if (PDFST.io) PDFST.io.disconnect();
+  PDFST = { key, doc, scale, h: vp1.height * scale, num: doc.numPages,
+            rendered: new Map(), io: null };
+  stack.replaceChildren();
+  for (let p = 1; p <= doc.numPages; p++) {
+    const d = document.createElement("div");
+    d.className = "pdfpage";
+    d.dataset.page = p;
+    d.style.width = (vp1.width * scale) + "px";
+    d.style.height = PDFST.h + "px";
+    stack.appendChild(d);
+  }
+  PDFST.io = new IntersectionObserver(entries => {
+    for (const e of entries)
+      if (e.isIntersecting) renderStackPage(+e.target.dataset.page);
+  }, { root: body, rootMargin: "60% 0px" });
+  stack.querySelectorAll(".pdfpage").forEach(d => PDFST.io.observe(d));
+}
+
+async function renderStackPage(p) {
+  const st = PDFST;
+  if (p < 1 || p > st.num || st.rendered.has(p)) return;
+  st.rendered.set(p, true);
+  const page = await st.doc.getPage(p);
+  if (PDFST !== st) return;
+  const dpr = devicePixelRatio || 1;
+  const vp = page.getViewport({ scale: st.scale * dpr });
+  const canvas = document.createElement("canvas");
+  canvas.width = vp.width;
+  canvas.height = vp.height;
+  canvas.style.width = (vp.width / dpr) + "px";
+  canvas.style.height = (vp.height / dpr) + "px";
+  await page.render(
+    { canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+  if (PDFST !== st) return;
+  const holder = document.querySelector(
+    `#pdfstack .pdfpage[data-page="${p}"]`);
+  if (!holder) return;
+  holder.style.height = (vp.height / dpr) + "px";  // exact per-page size
+  const mark = holder.querySelector("#pdfmark");
+  holder.replaceChildren(canvas);
+  if (mark) holder.appendChild(mark);
+  // keep memory bounded: drop the canvas of the farthest-away page
+  if (st.rendered.size > 16) {
+    let far = null, dist = -1;
+    for (const q of st.rendered.keys()) {
+      const dq = Math.abs(q - p);
+      if (dq > dist) { dist = dq; far = q; }
+    }
+    if (far !== null && dist > 8) {
+      st.rendered.delete(far);
+      const h = document.querySelector(
+        `#pdfstack .pdfpage[data-page="${far}"]`);
+      if (h) h.replaceChildren(
+        ...[...h.children].filter(x => x.id === "pdfmark"));
+    }
+  }
+}
+
+function pdfPageNo() {                // "p 12/240" while scrolling
+  const body = $("#pdfbody");
+  if (!PDFST.num) { $("#pdfpageno").textContent = ""; return; }
+  const mid = body.scrollTop + body.clientHeight / 3;
+  let cur = 1;
+  for (const d of document.querySelectorAll("#pdfstack .pdfpage"))
+    if (d.offsetTop <= mid) cur = +d.dataset.page;
+  $("#pdfpageno").textContent = `p. ${cur}/${PDFST.num}`;
+}
+$("#pdfbody").addEventListener("scroll", pdfPageNo);
+
+let pdfResizeT = null;
+addEventListener("resize", () => {
+  clearTimeout(pdfResizeT);
+  pdfResizeT = setTimeout(async () => {
+    if (PDFST.doc && PDFVIEW && !LOCAL) {
+      await buildPdfStack(PDFST.doc, PDFST.key);  // re-fit to width
+      syncPdf();
+    }
+  }, 300);
+});
+let PDFSEL = localStorage.getItem("texreview.pdffile") || "";
+
+function pdfSelUpdate(cands, current) {
+  const sel = $("#pdfSel");
+  cands = cands || [];
+  const sig = JSON.stringify([cands, current]);
+  if (sel._sig !== sig) {
+    sel._sig = sig;
+    sel.innerHTML = cands.map(p =>
+      `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    if (current) sel.value = current;
+  }
+  sel.hidden = cands.length === 0 || (cands.length < 2 && !!current);
+}
+
 async function syncPdf() {
   if (!PDFVIEW || LOCAL || !SEL) return;
-  const r = await api("/api/sync", { id: SEL });
+  const r = await api("/api/sync",
+                      { id: SEL, pdf: PDFSEL || undefined });
+  if (!r.ok && PDFSEL &&
+      !(r.data.pdfs || []).includes(PDFSEL)) {
+    PDFSEL = "";                       // stale choice from another repo
+    localStorage.removeItem("texreview.pdffile");
+    return syncPdf();
+  }
+  pdfSelUpdate(r.data.pdfs, r.data.pdf);
+  const msg = t => {                 // full text on hover (may be cut)
+    $("#pdfmsg").textContent = t;
+    $("#pdfmsg").title = t;
+  };
   if (!r.ok) {
-    $("#pdfmsg").textContent = r.data.error || "sync failed";
+    msg(r.data.error || "sync failed");
     return;
   }
   if (r.data.mode === "viewer") {
-    $("#pdfmsg").textContent =
-      `line ${r.data.line} → external viewer`;
+    msg(`line ${r.data.line} → external viewer`);
     return;
   }
-  $("#pdfmsg").textContent = `page ${r.data.page} (line ${r.data.line})`;
-  if (PDFCUR.url === r.data.url && PDFCUR.page === r.data.page) return;
-  PDFCUR = { url: r.data.url, page: r.data.page };
-  // &v= forces a real navigation so the built-in viewer re-opens at
-  // the page; the response is cacheable so this stays cheap
-  $("#pdfframe").src =
-    `${r.data.url}&v=${r.data.page}#page=${r.data.page}`;
+  msg(`${r.data.pdf} — page ${r.data.page} (line ${r.data.line})`);
+  const lib = await loadPdfjs();
+  if (!lib) {                        // no PDF.js: page-level iframe
+    $("#pdfbody").hidden = true;
+    $("#pdfframe").hidden = false;
+    if (PDFCUR.url === r.data.url && PDFCUR.page === r.data.page) return;
+    PDFCUR = { url: r.data.url, page: r.data.page };
+    $("#pdfframe").src =
+      `${r.data.url}&v=${r.data.page}#page=${r.data.page}`;
+    return;
+  }
+  $("#pdfframe").hidden = true;
+  $("#pdfbody").hidden = false;
+  const seq = ++pdfSeq;
+  try {
+    if (PDFST.key !== r.data.pdfkey) {
+      const doc = await lib.getDocument(r.data.url).promise;
+      if (seq !== pdfSeq) return;
+      await buildPdfStack(doc, r.data.pdfkey);
+    }
+    if (seq !== pdfSeq) return;
+    const page = Math.min(Math.max(1, r.data.page), PDFST.num);
+    renderStackPage(page);            // don't wait for the observer
+    const holder = document.querySelector(
+      `#pdfstack .pdfpage[data-page="${page}"]`);
+    // synctex y is measured from the top of the page, in points
+    const yCss = r.data.y * PDFST.scale;
+    let mark = document.querySelector("#pdfmark");
+    if (!mark) {
+      mark = document.createElement("div");
+      mark.id = "pdfmark";
+    }
+    mark.style.top = (yCss - 16) + "px";
+    holder.appendChild(mark);
+    $("#pdfbody").scrollTop =
+      Math.max(0, holder.offsetTop + yCss
+                  - $("#pdfbody").clientHeight / 2);
+    pdfPageNo();
+  } catch (e) {
+    console.warn("PDF render failed", e);
+    PDFST.key = null;                 // retry fresh next time
+    if (seq === pdfSeq) msg(`PDF error: ${e.message || e}`);
+  }
 }
 
 function docHTML(text, subs) {
@@ -1023,6 +1299,23 @@ function decide(id, status) {
   flushTimer = setTimeout(flushDecisions, 300);
 }
 
+/* bulk decide the pending suggestions in the current filter — pairs
+   with pattern tags (filter by tag, then accept/reject the family) */
+function decideShown(status) {
+  const todo = visible().filter(s => s.status === "pending");
+  if (!todo.length) return;
+  const verb = status === "accepted" ? "Accept" : "Reject";
+  if (!confirm(`${verb} the ${todo.length} pending suggestion(s) ` +
+               `currently shown?`)) return;
+  todo.forEach(s => {
+    s.status = status;
+    PENDING.set(s.id, status);
+  });
+  render();
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(flushDecisions, 300);
+}
+
 function flushDecisions() {
   if (!flushPromise)
     flushPromise = (async () => {
@@ -1116,8 +1409,16 @@ document.addEventListener("click", e => {
   if (e.target.closest("#texBtn")) { toggleTex(); return; }
   if (e.target.closest("#docBtn")) { toggleDoc(); return; }
   if (e.target.closest("#pdfBtn")) { togglePdf(); return; }
+  if (e.target.closest("#noteBtn")) {
+    NOTEUNDER = !NOTEUNDER;
+    localStorage.setItem("texreview.notes", NOTEUNDER ? "below" : "side");
+    applyDocPrefs();
+    return;
+  }
   if (e.target.closest("#helpBtn")) { $("#help").showModal(); return; }
   if (e.target.closest("#purgeBtn")) { purgeAll(); return; }
+  if (e.target.closest("#accShown")) { decideShown("accepted"); return; }
+  if (e.target.closest("#rejShown")) { decideShown("rejected"); return; }
   if (e.target.closest("#addBtn")) { openNewSug(); return; }
   if (e.target.closest("#nsCreate")) { submitSug(); return; }
   const nstag = e.target.closest("[data-nstag]");
@@ -1136,12 +1437,11 @@ document.addEventListener("click", e => {
   if (mk) { SEL = mk.dataset.id; render(); return; }
   const tagEl = e.target.closest("[data-tag]");
   if (tagEl) { setTag(tagEl.dataset.tag); return; }
-  const tab = e.target.closest(".tab");
+  const tab = e.target.closest(".tab[data-f]");
   if (tab) {
     FILTER = tab.dataset.f;
-    document.querySelectorAll(".tab").forEach(t =>
-      t.classList.toggle("on", t === tab));
-    render(); return;
+    render();                     // render() owns the tabs' on-state
+    return;
   }
   if (e.target.closest(".rbox, .redit")) return;  // typing — don't rerender
   const cardEl = e.target.closest(".card");
@@ -1776,10 +2076,14 @@ $("#wrapBtn").addEventListener("click", () => {
   applyDocPrefs();
   renderRuler();          // wrap changes line geometry
 });
-$("#sideBtn").addEventListener("click", () => {
-  DOCLEFT = !DOCLEFT;
-  localStorage.setItem("texreview.docside", DOCLEFT ? "left" : "right");
-  applyDocPrefs();
+document.querySelectorAll(".mv").forEach(b =>
+  b.addEventListener("click", () =>
+    movePanel(b.dataset.pane, +b.dataset.dir)));
+$("#pdfSel").addEventListener("change", e => {
+  PDFSEL = e.target.value;
+  localStorage.setItem("texreview.pdffile", PDFSEL);
+  PDFDOC = { key: null, doc: null };   // force reload of the new PDF
+  syncPdf();
 });
 applyDocPrefs();
 

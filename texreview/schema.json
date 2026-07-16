@@ -58,12 +58,12 @@
         },
         "reasoning": {
           "type": "string",
-          "description": "One-sentence explanation shown to the reviewer; may contain TeX math."
+          "description": "One-sentence explanation shown to the reviewer; rendered with MathJax, so write math between $...$ (e.g. $O(n \\log n)$)."
         },
         "tags": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Short labels such as grammar, clarity, typo, notation."
+          "description": "Short labels; several are encouraged: a broad category (grammar, typo, notation, ...) plus a stable kebab-case pattern tag for recurring issues (e.g. space-before-question-mark) so reviewers can filter and bulk-handle them."
         },
         "id": {
           "type": "string",
