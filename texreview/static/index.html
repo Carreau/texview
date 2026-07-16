@@ -255,11 +255,38 @@ window.MathJax = {
   #docmid { flex: 1; min-height: 0; display: flex; }
   #docbody { flex: 1; min-width: 0; overflow: auto; }
   body.docleft #docpane { order: -1; }   /* pane on the left */
-  #dochdr { flex: none;
+  #dochdr, #pdfhdr { flex: none;
             background: var(--paper); border-bottom: 1px solid var(--rule);
             font: 12px var(--mono); color: var(--faint);
             padding: 6px 12px; display: flex; gap: 6px;
             align-items: center; }
+
+  /* ---- PDF pane (synctex-synced) ---- */
+  #pdfpane { display: none; }
+  body.pdfview #pdfpane {
+    display: flex; flex-direction: column; flex: 1.1; min-width: 0;
+    position: sticky; top: calc(var(--hdr, 48px) + var(--navh, 44px));
+    height: calc(100vh - var(--hdr, 48px) - var(--navh, 44px) - 16px);
+    overflow: hidden; background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 6px;
+  }
+  body.pdfview #cols {
+    display: flex; align-items: flex-start; gap: 18px;
+    max-width: 1600px; margin: 0 auto; padding: 0 20px;
+  }
+  body.pdfview nav { max-width: 1600px; }
+  body.pdfview main { flex: 1.1; min-width: 0; margin: 0 0 90px;
+                      padding: 0; }
+  body.docview.pdfview #cols, body.docview.pdfview nav {
+    max-width: 2200px;
+  }
+  #pdfframe { flex: 1; width: 100%; border: 0; background: #f1efe8; }
+  #pdfBtn.on { color: var(--ink); border-bottom-color: var(--pencil); }
+  @media (max-width: 1100px) {
+    body.pdfview #cols { display: contents; }
+    body.pdfview main { margin: 0 auto 90px; padding: 0 20px; }
+    body.pdfview #pdfpane { display: none; }
+  }
 
   /* ---- overview ruler (minimap strip) ---- */
   #ruler { flex: none; width: 13px; position: relative;
@@ -364,6 +391,7 @@ window.MathJax = {
   <span id="tagbar" title="filter by tag"></span>
   <button class="tab on" id="texBtn" title="render math in previews and notes">Σ&nbsp;TeX<kbd>m</kbd></button>
   <button class="tab" id="docBtn" title="show the full document beside the list">⧉&nbsp;Doc<kbd>d</kbd></button>
+  <button class="tab" id="pdfBtn" title="show the compiled PDF, synced to the selection via synctex">📄&nbsp;PDF<kbd>P</kbd></button>
   <label class="ctxctl" title="context lines shown around each change">
     ±<input id="ctx" type="number" min="0" max="99" step="1"> lines<kbd>+/−</kbd>
   </label>
@@ -390,6 +418,10 @@ window.MathJax = {
     <div id="ruler"><i id="rthumb"></i></div>
   </div>
 </aside>
+<aside id="pdfpane">
+  <div id="pdfhdr"><span id="pdfmsg">PDF</span></div>
+  <iframe id="pdfframe" title="compiled PDF"></iframe>
+</aside>
 </div>
 <div id="toast" role="status"></div>
 
@@ -410,6 +442,7 @@ window.MathJax = {
     <tr><td><kbd>+</kbd>/<kbd>−</kbd></td><td>more / less context around each change</td></tr>
     <tr><td><kbd>m</kbd></td><td>render TeX in notes &amp; previews (the diff stays verbatim)</td></tr>
     <tr><td><kbd>d</kbd></td><td>document pane — full file with every suggestion highlighted</td></tr>
+    <tr><td><kbd>P</kbd></td><td>PDF pane — compiled PDF follows the selection via synctex (or jumps an external viewer if the server was started with <code>--pdf-viewer</code>)</td></tr>
     <tr><td><kbd>A</kbd></td><td>apply all accepted suggestions (applied cards get ↶ Revert)</td></tr>
     <tr><td><kbd>?</kbd></td><td>this help (<kbd>Esc</kbd> closes)</td></tr>
   </table>
@@ -449,6 +482,8 @@ let CTX = (() => {        // context lines around each change, persisted
 })();
 let DOCVIEW = localStorage.getItem("texreview.doc") === "1";
 let DOCLEFT = localStorage.getItem("texreview.docside") === "left";
+let PDFVIEW = localStorage.getItem("texreview.pdf") === "1";
+let PDFCUR = { url: null, page: 0 };   // what the PDF iframe shows
 let WRAP = localStorage.getItem("texreview.wrap") !== "0";
 let DOC = { fkey: null, text: null, stale: true };  // document pane cache
 let USER = sessionStorage.getItem("texreview.user") || "";  // author override
@@ -679,6 +714,7 @@ function render() {
   const re = document.querySelector(".redit");
   if (re) re.focus();
   renderDoc();
+  renderPdf();
   typeset();
 }
 
@@ -686,7 +722,9 @@ function render() {
 function applyDocPrefs() {
   document.body.classList.toggle("docview", DOCVIEW);
   document.body.classList.toggle("docleft", DOCLEFT);
+  document.body.classList.toggle("pdfview", PDFVIEW && !LOCAL);
   $("#docBtn").classList.toggle("on", DOCVIEW);
+  $("#pdfBtn").classList.toggle("on", PDFVIEW && !LOCAL);
   $("#doc").classList.toggle("nowrap", !WRAP);
   $("#wrapBtn").classList.toggle("on", WRAP);
   $("#wrapBtn").textContent = WRAP ? "wrap" : "no-wrap";
@@ -696,6 +734,43 @@ function toggleDoc() {
   localStorage.setItem("texreview.doc", DOCVIEW ? "1" : "0");
   applyDocPrefs();
   render();
+}
+
+/* ---- PDF pane: synctex-forward the selection ---- */
+function togglePdf() {
+  if (LOCAL) { toast("PDF sync needs the tex-review server"); return; }
+  PDFVIEW = !PDFVIEW;
+  localStorage.setItem("texreview.pdf", PDFVIEW ? "1" : "0");
+  applyDocPrefs();
+  render();
+}
+
+let pdfTimer = null;
+function renderPdf() {
+  if (!PDFVIEW || LOCAL) return;
+  clearTimeout(pdfTimer);           // debounce rapid j/k runs
+  pdfTimer = setTimeout(syncPdf, 250);
+}
+
+async function syncPdf() {
+  if (!PDFVIEW || LOCAL || !SEL) return;
+  const r = await api("/api/sync", { id: SEL });
+  if (!r.ok) {
+    $("#pdfmsg").textContent = r.data.error || "sync failed";
+    return;
+  }
+  if (r.data.mode === "viewer") {
+    $("#pdfmsg").textContent =
+      `line ${r.data.line} → external viewer`;
+    return;
+  }
+  $("#pdfmsg").textContent = `page ${r.data.page} (line ${r.data.line})`;
+  if (PDFCUR.url === r.data.url && PDFCUR.page === r.data.page) return;
+  PDFCUR = { url: r.data.url, page: r.data.page };
+  // &v= forces a real navigation so the built-in viewer re-opens at
+  // the page; the response is cacheable so this stays cheap
+  $("#pdfframe").src =
+    `${r.data.url}&v=${r.data.page}#page=${r.data.page}`;
 }
 
 function docHTML(text, subs) {
@@ -1040,6 +1115,7 @@ function toast(msg) {
 document.addEventListener("click", e => {
   if (e.target.closest("#texBtn")) { toggleTex(); return; }
   if (e.target.closest("#docBtn")) { toggleDoc(); return; }
+  if (e.target.closest("#pdfBtn")) { togglePdf(); return; }
   if (e.target.closest("#helpBtn")) { $("#help").showModal(); return; }
   if (e.target.closest("#purgeBtn")) { purgeAll(); return; }
   if (e.target.closest("#addBtn")) { openNewSug(); return; }
@@ -1116,6 +1192,7 @@ document.addEventListener("keydown", e => {
   else if (k === "e") openEditSug(SEL);
   else if (k === "m") toggleTex();
   else if (k === "d") toggleDoc();
+  else if (k === "P") togglePdf();
   else if (k === "+" || k === "=") setCtx(CTX + 1);
   else if (k === "-") setCtx(CTX - 1);
   else if (k === "A") applyAll();
@@ -1710,7 +1787,9 @@ applyDocPrefs();
   LOCAL = await detectMode();
   if (LOCAL) {
     $("#localbar").hidden = false;
+    $("#pdfBtn").hidden = true;    // synctex needs the server
     $("#source").textContent = "local mode — files stay in this browser";
+    applyDocPrefs();               // drop a persisted pdfview class
   }
   refresh();
 })();

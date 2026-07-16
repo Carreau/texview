@@ -5,11 +5,14 @@ from __future__ import annotations
 import getpass
 import json
 import mimetypes
+import shlex
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from .core import (VALID_STATUSES, Store, annotate, apply_accepted,
                    content_key, locate)
@@ -17,6 +20,29 @@ from .core import (VALID_STATUSES, Store, annotate, apply_accepted,
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def synctex_page(tex: Path, line: int, pdf: Path):
+    """Forward search via the synctex CLI: source line -> PDF page.
+    Returns None if synctex is missing, times out, or finds nothing
+    (e.g. the PDF was not compiled with -synctex=1)."""
+    exe = shutil.which("synctex")
+    if exe is None:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "view", "-i", f"{max(1, line)}:1:{tex}",
+             "-o", str(pdf)],
+            capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for ln in out.stdout.splitlines():
+        if ln.startswith("Page:"):
+            try:
+                return int(ln.split(":", 1)[1])
+            except ValueError:
+                return None
+    return None
 
 
 def tilde(path: Path) -> str:
@@ -30,14 +56,25 @@ def tilde(path: Path) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     store: Store  # set on the class before serving
+    pdf_viewer = None  # forward-search command template (--pdf-viewer)
 
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
+    def _send(self, code: int, body: bytes, ctype: str,
+              cache: str = "no-store") -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
+
+    def _pdf_for(self, s):
+        """(abs tex path, abs pdf path or None) for a suggestion."""
+        base = s["_base"]
+        tex = (base / s.get("file", "")).resolve()
+        pdf = tex.with_suffix(".pdf")
+        if str(pdf).startswith(str(base)) and pdf.is_file():
+            return tex, pdf
+        return tex, None
 
     def _json(self, obj, code: int = 200) -> None:
         self._send(code, json.dumps(obj).encode(), "application/json")
@@ -71,6 +108,19 @@ class Handler(BaseHTTPRequestHandler):
                 if text is None:
                     return self._json({"error": "file unreadable"}, 404)
                 self._json({"file": s.get("file", ""), "text": text})
+        elif urlparse(self.path).path == "/api/pdf":
+            # the compiled PDF next to a suggestion's tex file;
+            # cacheable so page jumps don't refetch it
+            sid = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+            with self.store.lock:
+                s = self.store.suggestion(sid)
+                if s is None:
+                    return self._json({"error": "unknown id"}, 404)
+                _, pdf = self._pdf_for(s)
+            if pdf is None:
+                return self._json({"error": "no PDF"}, 404)
+            self._send(200, pdf.read_bytes(), "application/pdf",
+                       cache="max-age=300")
         elif urlparse(self.path).path == "/api/state":
             q = parse_qs(urlparse(self.path).query)
             try:
@@ -185,6 +235,45 @@ class Handler(BaseHTTPRequestHandler):
                 self.store.edit(s["id"], fields)
             return self._json({"ok": True})
 
+        if self.path == "/api/sync":
+            # synctex forward search for a suggestion's current line:
+            # either jump an external viewer (--pdf-viewer template)
+            # or report the PDF page for the in-UI panel
+            with self.store.lock:
+                s = self.store.suggestion(body.get("id"))
+                if s is None:
+                    return self._json({"error": "unknown id"}, 404)
+                text = self.store.file_text(s)
+                line = locate(text, s).line
+                if not line and text and s.get("status") == "applied" \
+                        and isinstance(s.get("applied_at"), int):
+                    line = text.count("\n", 0, s["applied_at"]) + 1
+                line = line or 1
+                tex, pdf = self._pdf_for(s)
+                sid = s["id"]
+            if pdf is None:
+                return self._json(
+                    {"error": f"no PDF next to {s.get('file', '?')} — "
+                              "compile it first"}, 404)
+            if self.pdf_viewer:
+                cmd = [t.format(line=line, tex=str(tex), pdf=str(pdf))
+                       for t in shlex.split(self.pdf_viewer)]
+                try:
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                except OSError as e:
+                    return self._json({"error": f"viewer: {e}"}, 500)
+                return self._json({"mode": "viewer", "line": line})
+            page = synctex_page(tex, line, pdf)
+            if page is None:
+                return self._json(
+                    {"error": "synctex lookup failed — is the synctex "
+                              "CLI installed and the PDF compiled with "
+                              "-synctex=1?"}, 409)
+            return self._json({"mode": "page", "page": page,
+                               "line": line,
+                               "url": f"/api/pdf?id={quote(sid)}"})
+
         if self.path == "/api/purge":
             sts = body.get("statuses") or ["applied", "rejected"]
             if not isinstance(sts, list) \
@@ -216,8 +305,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def serve(store: Store, port: int = 8123, open_browser: bool = False) -> None:
+def serve(store: Store, port: int = 8123, open_browser: bool = False,
+          pdf_viewer: str = None) -> None:
     Handler.store = store
+    Handler.pdf_viewer = pdf_viewer
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}"
     print(f"reviewing {tilde(store.path)}  →  {url}")

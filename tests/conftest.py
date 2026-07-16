@@ -103,8 +103,9 @@ def make_client():
     """Factory: start the HTTP server for a review target, yield Client."""
     servers = []
 
-    def _make(target: Path) -> Client:
+    def _make(target: Path, pdf_viewer=None) -> Client:
         srv.Handler.store = Store(Path(target))
+        srv.Handler.pdf_viewer = pdf_viewer
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         servers.append(httpd)

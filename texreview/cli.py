@@ -37,7 +37,8 @@ def cmd_review(args) -> int:
     store = _load_store(args.target)
     if store is None:
         return 1
-    serve(store, port=args.port, open_browser=args.open)
+    serve(store, port=args.port, open_browser=args.open,
+          pdf_viewer=args.pdf_viewer)
     return 0
 
 
@@ -116,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8123)
     p.add_argument("--open", action="store_true",
                    help="open the UI in a browser")
+    p.add_argument(
+        "--pdf-viewer", metavar="TEMPLATE",
+        help="synctex forward-search command run when the PDF panel "
+             "follows the selection; placeholders {line} {tex} {pdf}. "
+             "E.g. zathura: \"zathura --synctex-forward {line}:1:{tex} "
+             "{pdf}\"; okular: \"okular --unique {pdf}#src:{line} "
+             "{tex}\"; Skim: \"displayline {line} {pdf} {tex}\"")
     p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("apply", help="apply accepted suggestions")

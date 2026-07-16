@@ -144,6 +144,16 @@ or decisions semantics, change BOTH implementations.
 - `POST /api/apply` → `{applied: [...], skipped: [{id, reason}]}`.
 - `POST /api/revert {id}` → `{ok}`; 404 unknown, 409 not-applied or
   unrevertable (reason in `error`). UI: `↶ Revert` on applied cards.
+- `GET /api/pdf?id=<sid>` → the compiled PDF next to the suggestion's
+  tex file (`<stem>.pdf`, containment-guarded; `Cache-Control:
+  max-age=300` so page jumps don't refetch).
+- `POST /api/sync {id}` → synctex forward search for the suggestion's
+  current line (falls back to `applied_at` for applied ones). With
+  `--pdf-viewer TEMPLATE` (placeholders `{line} {tex} {pdf}`,
+  shlex-split then formatted per token) it spawns the external viewer
+  and returns `{mode: "viewer"}`; otherwise runs the `synctex` CLI and
+  returns `{mode: "page", page, url}`. 404 no PDF, 409 synctex
+  unavailable. `synctex` itself is mocked in tests (no TeX in CI).
 - `POST /api/purge {statuses?}` → purge report (defaults
   applied+rejected). UI: `🧹 Purge` toolbar button (confirm dialog,
   flushes pending decisions first). In local mode, purged pass files
@@ -170,6 +180,12 @@ or decisions semantics, change BOTH implementations.
   a per-file `<select>` (keyed by `fkey`, hidden when only one file
   has suggestions; choosing a file moves the selection — and the doc
   pane — into it). Status ∩ tag ∩ file all combine.
+- PDF pane (`📄 PDF` / `P`, persisted as `texreview.pdf`, hidden in
+  local mode and under 1100px): iframe on the browser's built-in PDF
+  viewer via `/api/pdf?id=...&v=<page>#page=<page>` (the `v` param
+  forces a real navigation on page change; caching keeps it cheap).
+  Selection changes call `/api/sync` debounced 250 ms; in
+  `--pdf-viewer` mode the pane just reports "→ external viewer".
 - Live auto-refresh: a 3 s `pollState` interval refetches
   `/api/state`, compares a cheap signature (key/status/replies/edited/
   new), and re-renders only on change (toast for new suggestions).

@@ -143,16 +143,67 @@ Schema. The same text lives in
 Skipped suggestions are never silently applied — the apply report lists
 them, and they stay `accepted` so you can fix and re-apply.
 
+## PDF panel (SyncTeX)
+
+If a compiled `paper.pdf` sits next to `paper.tex`, the **📄 PDF**
+toggle (or `P`) opens a third panel showing the PDF, and it follows
+your selection: each suggestion is forward-searched with SyncTeX and
+the viewer jumps to the right page. Requirements: compile with
+`-synctex=1` (so `paper.synctex.gz` exists) and have the `synctex`
+CLI on the PATH (ships with TeX Live/MacTeX).
+
+Prefer your own PDF reader? Start the server with a forward-search
+command template and the selection will drive it instead of the
+in-page panel (placeholders: `{line}`, `{tex}`, `{pdf}`):
+
+```
+tex-review review review/ --pdf-viewer "zathura --synctex-forward {line}:1:{tex} {pdf}"
+tex-review review review/ --pdf-viewer "okular --unique {pdf}#src:{line} {tex}"
+tex-review review review/ --pdf-viewer "displayline {line} {pdf} {tex}"   # Skim (macOS)
+```
+
+The in-page panel uses the browser's built-in PDF viewer at page
+granularity; external viewers give smooth, exact positioning. PDF
+sync needs the server (it is not available in static/local mode).
+
 ## No-install / static mode
 
-The UI is a single self-contained page: host `texreview/static/
-index.html` anywhere static (a GitHub Pages deploy workflow is
-included) or just open it from disk, and it switches to **local
-mode** — drop your `.tex` file(s) and review `.json` passes onto the
-page, review and apply entirely in the browser (nothing is uploaded),
-then hit **⬇ Save** to download the edited files plus
-`decisions.json`/`manual.json`/`comments.json`. Those files are fully
-compatible with the CLI, so you can move between modes freely.
+The UI is a single self-contained page. Served without the Python
+backend it switches to **local mode**: files are loaded into the
+browser, reviewed and applied there (nothing is uploaded anywhere),
+and downloaded back when you're done.
+
+### Publishing it
+
+- **GitHub Pages (included):** the repo ships
+  `.github/workflows/pages.yml`, which publishes the page on every
+  push to `main`. One-time setup: in the repo's **Settings → Pages**,
+  set *Source* to **GitHub Actions**. The reviewer then lives at
+  `https://<user>.github.io/<repo>/`.
+- **Any static host:** it is one file with zero assets — copy
+  `texreview/static/index.html` to Netlify, S3, your web space, a
+  `python -m http.server` directory, anywhere.
+- **No host at all:** just double-click `index.html` (a `file://`
+  URL works) or keep a copy next to your manuscript.
+
+### Using it
+
+1. Open the page. It shows "local mode — files stay in this browser"
+   and 📂 Open / ⬇ Save buttons appear in the toolbar.
+2. **Drag and drop** your `.tex` file(s) and the `review/*.json`
+   passes anywhere onto the page (or pick them via 📂 Open). Also
+   drop `decisions.json` / `comments.json` / `manual.json` if you are
+   resuming an earlier session.
+3. Review as usual — accept/reject, edit, reply, add your own
+   suggestions from the document pane, **Apply accepted**, purge.
+4. Hit **⬇ Save**: the browser downloads the edited `.tex` files plus
+   `decisions.json` / `manual.json` / `comments.json` (and any pass
+   files rewritten by purge). Move them back over the originals —
+   they are byte-compatible with the CLI, so you can continue in
+   either mode.
+
+Everything stays on your machine; the only network request the page
+ever makes is the optional MathJax CDN load.
 
 ## Housekeeping
 
