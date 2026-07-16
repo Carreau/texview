@@ -98,6 +98,7 @@ window.MathJax = {
           border: 1px solid var(--rule); background: var(--paper);
           color: #44506b; cursor: pointer; }
   .tagf.on { background: #44506b; border-color: #44506b; color: #fff; }
+  .tagf.zero { opacity: .45; }
   .tagf .n { opacity: .6; margin-left: 3px; }
   .tab { background: none; border: 0; border-bottom: 2px solid transparent;
          padding: 4px 2px; margin-right: 10px; font: 500 13px var(--sans);
@@ -732,13 +733,23 @@ function setTag(t) {
 }
 
 function tagbar() {
+  const all = new Set();
+  STATE.suggestions.forEach(s => (s.tags || []).forEach(t => all.add(t)));
+  if (TAG !== null && !all.has(TAG)) TAG = null;
+  // counts reflect the other active filters (status tab + file), so a
+  // chip answers "how many of these in what I'm looking at?"
   const counts = new Map();
-  STATE.suggestions.forEach(s =>
-    (s.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
-  if (TAG !== null && !counts.has(TAG)) TAG = null;
-  $("#tagbar").innerHTML = [...counts.keys()].sort().map(t =>
-    `<button class="tagf ${t === TAG ? "on" : ""}" data-tag="${esc(t)}">
-       ${esc(t)}<span class="n">${counts.get(t)}</span></button>`).join("");
+  STATE.suggestions
+    .filter(s => (FILTER === "all" || s.status === FILTER) &&
+                 (FILE === null || s.fkey === FILE))
+    .forEach(s =>
+      (s.tags || []).forEach(t => counts.set(t, (counts.get(t) || 0) + 1)));
+  $("#tagbar").innerHTML = [...all].sort().map(t => {
+    const n = counts.get(t) || 0;
+    return `<button class="tagf ${t === TAG ? "on" : ""}${
+             n ? "" : " zero"}" data-tag="${esc(t)}">
+       ${esc(t)}<span class="n">${n}</span></button>`;
+  }).join("");
 }
 
 function render() {
