@@ -121,9 +121,9 @@ def test_full_workflow_parity(basic_review):
   await localApi("/api/decide", {{ id: "s3", status: "accepted" }});
   const rep = (await localApi("/api/apply", {{}})).data;
   const rev = await localApi("/api/revert", {{ id: "s2" }});
-  const prune = (await localApi("/api/purge", {{}})).data;
+  const purge = (await localApi("/api/purge", {{}})).data;
   console.log(JSON.stringify({{
-    rep, revOk: rev.ok, prune,
+    rep, revOk: rev.ok, purge,
     decisions: LS.decisions,
     text: LS.files.get("paper.tex"),
     passIds: LS.passes[0].doc.suggestions.map(s => s.id),
@@ -134,7 +134,7 @@ def test_full_workflow_parity(basic_review):
     assert sorted(got["rep"]["applied"]) == ["s2", "s3"]
     assert got["rep"]["skipped"] == []
     assert got["revOk"] is True
-    assert got["prune"]["removed"] == ["s3"]
+    assert got["purge"]["removed"] == ["s3"]
     assert got["decisions"] == py_decisions
     assert got["text"] == py_text
     assert got["passIds"] == [s["id"] for s in py_pass["suggestions"]]
